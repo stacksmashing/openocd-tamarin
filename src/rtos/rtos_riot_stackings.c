@@ -1,19 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
+
 /***************************************************************************
  *   Copyright (C) 2015 by Daniel Krebs                                    *
  *   Daniel Krebs - github@daniel-krebs.net                                *
- *                                                                         *
- *   This program is free software; you can redistribute it and/or modify  *
- *   it under the terms of the GNU General Public License as published by  *
- *   the Free Software Foundation; either version 2 of the License, or     *
- *   (at your option) any later version.                                   *
- *                                                                         *
- *   This program is distributed in the hope that it will be useful,       *
- *   but WITHOUT ANY WARRANTY; without even the implied warranty of        *
- *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the         *
- *   GNU General Public License for more details.                          *
- *                                                                         *
- *   You should have received a copy of the GNU General Public License     *
- *   along with this program.  If not, see <http://www.gnu.org/licenses/>. *
  ***************************************************************************/
 
 #ifdef HAVE_CONFIG_H
@@ -27,12 +16,12 @@
 /* This works for the M0 and M34 stackings as xPSR is in a fixed
  * location
  */
-static int64_t rtos_riot_cortex_m_stack_align(struct target *target,
+static target_addr_t rtos_riot_cortex_m_stack_align(struct target *target,
 	const uint8_t *stack_data, const struct rtos_register_stacking *stacking,
-	int64_t stack_ptr)
+	target_addr_t stack_ptr)
 {
 	const int XPSR_OFFSET = 0x40;
-	return rtos_Cortex_M_stack_align(target, stack_data, stacking,
+	return rtos_cortex_m_stack_align(target, stack_data, stacking,
 		stack_ptr, XPSR_OFFSET);
 }
 
@@ -54,15 +43,15 @@ static const struct stack_register_offset rtos_riot_cortex_m0_stack_offsets[ARMV
 	{ ARMV7M_R13,   -2,   32 },		/* sp   */
 	{ ARMV7M_R14,   0x38, 32 },		/* lr   */
 	{ ARMV7M_PC,    0x3c, 32 },		/* pc   */
-	{ ARMV7M_xPSR,  0x40, 32 },		/* xPSR */
+	{ ARMV7M_XPSR,  0x40, 32 },		/* xPSR */
 };
 
 const struct rtos_register_stacking rtos_riot_cortex_m0_stacking = {
-	0x44,					/* stack_registers_size */
-	-1,						/* stack_growth_direction */
-	ARMV7M_NUM_CORE_REGS,	/* num_output_registers */
-	rtos_riot_cortex_m_stack_align,		/* stack_alignment */
-	rtos_riot_cortex_m0_stack_offsets	/* register_offsets */
+	.stack_registers_size = 0x44,
+	.stack_growth_direction = -1,
+	.num_output_registers = ARMV7M_NUM_CORE_REGS,
+	.calculate_process_stack = rtos_riot_cortex_m_stack_align,
+	.register_offsets = rtos_riot_cortex_m0_stack_offsets
 };
 
 /* see thread_arch.c */
@@ -83,13 +72,13 @@ static const struct stack_register_offset rtos_riot_cortex_m34_stack_offsets[ARM
 	{ ARMV7M_R13,   -2,   32 },	/* sp   */
 	{ ARMV7M_R14,   0x38, 32 },	/* lr   */
 	{ ARMV7M_PC,    0x3c, 32 },	/* pc   */
-	{ ARMV7M_xPSR,  0x40, 32 },	/* xPSR */
+	{ ARMV7M_XPSR,  0x40, 32 },	/* xPSR */
 };
 
 const struct rtos_register_stacking rtos_riot_cortex_m34_stacking = {
-	0x44,			/* stack_registers_size */
-	-1,			/* stack_growth_direction */
-	ARMV7M_NUM_CORE_REGS,	/* num_output_registers */
-	rtos_riot_cortex_m_stack_align,	/* stack_alignment */
-	rtos_riot_cortex_m34_stack_offsets	/* register_offsets */
+	.stack_registers_size = 0x44,
+	.stack_growth_direction = -1,
+	.num_output_registers = ARMV7M_NUM_CORE_REGS,
+	.calculate_process_stack = rtos_riot_cortex_m_stack_align,
+	.register_offsets = rtos_riot_cortex_m34_stack_offsets
 };

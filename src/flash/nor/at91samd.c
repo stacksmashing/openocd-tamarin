@@ -1,19 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
+
 /***************************************************************************
  *   Copyright (C) 2013 by Andrey Yurovsky                                 *
  *   Andrey Yurovsky <yurovsky@gmail.com>                                  *
- *                                                                         *
- *   This program is free software; you can redistribute it and/or modify  *
- *   it under the terms of the GNU General Public License as published by  *
- *   the Free Software Foundation; either version 2 of the License, or     *
- *   (at your option) any later version.                                   *
- *                                                                         *
- *   This program is distributed in the hope that it will be useful,       *
- *   but WITHOUT ANY WARRANTY; without even the implied warranty of        *
- *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the         *
- *   GNU General Public License for more details.                          *
- *                                                                         *
- *   You should have received a copy of the GNU General Public License     *
- *   along with this program.  If not, see <http://www.gnu.org/licenses/>. *
  ***************************************************************************/
 
 #ifdef HAVE_CONFIG_H
@@ -23,6 +12,8 @@
 #include "imp.h"
 #include "helper/binarybuffer.h"
 
+#include <helper/time_support.h>
+#include <jtag/jtag.h>
 #include <target/cortex_m.h>
 
 #define SAMD_NUM_PROT_BLOCKS	16
@@ -41,7 +32,7 @@
 #define SAMD_NVMCTRL_CTRLA		0x00	/* NVM control A register */
 #define SAMD_NVMCTRL_CTRLB		0x04	/* NVM control B register */
 #define SAMD_NVMCTRL_PARAM		0x08	/* NVM parameters register */
-#define SAMD_NVMCTRL_INTFLAG	0x18	/* NVM Interrupt Flag Status & Clear */
+#define SAMD_NVMCTRL_INTFLAG	0x14	/* NVM Interrupt Flag Status & Clear */
 #define SAMD_NVMCTRL_STATUS		0x18	/* NVM status register */
 #define SAMD_NVMCTRL_ADDR		0x1C	/* NVM address register */
 #define SAMD_NVMCTRL_LOCK		0x20	/* NVM Lock section register */
@@ -64,6 +55,9 @@
 
 /* NVMCTRL bits */
 #define SAMD_NVM_CTRLB_MANW 0x80
+
+/* NVMCTRL_INTFLAG bits */
+#define SAMD_NVM_INTFLAG_READY 0x01
 
 /* Known identifiers */
 #define SAMD_PROCESSOR_M0	0x01
@@ -250,6 +244,7 @@ static const struct samd_part saml21_parts[] = {
 
     /* SAMR34/R35 parts have integrated SAML21 with a lora radio */
 	{ 0x28, "SAMR34J18", 256, 32 },
+	{ 0x2B, "SAMR35J18", 256, 32 },
 };
 
 /* Known SAML22 parts. */
@@ -385,7 +380,7 @@ static const struct samd_part *samd_find_part(uint32_t id)
 {
 	uint8_t devsel = SAMD_GET_DEVSEL(id);
 	const struct samd_family *family = samd_find_family(id);
-	if (family == NULL)
+	if (!family)
 		return NULL;
 
 	for (unsigned i = 0; i < family->num_parts; i++) {
@@ -452,7 +447,7 @@ static int samd_probe(struct flash_bank *bank)
 	}
 
 	part = samd_find_part(id);
-	if (part == NULL) {
+	if (!part) {
 		LOG_ERROR("Couldn't find part corresponding to DID %08" PRIx32, id);
 		return ERROR_FAIL;
 	}
@@ -506,7 +501,27 @@ static int samd_probe(struct flash_bank *bank)
 static int samd_check_error(struct target *target)
 {
 	int ret, ret2;
+	uint8_t intflag;
 	uint16_t status;
+	int timeout_ms = 1000;
+	int64_t ts_start = timeval_ms();
+
+	do {
+		ret = target_read_u8(target,
+			SAMD_NVMCTRL + SAMD_NVMCTRL_INTFLAG, &intflag);
+		if (ret != ERROR_OK) {
+			LOG_ERROR("Can't read NVM intflag");
+			return ret;
+		}
+		if (intflag & SAMD_NVM_INTFLAG_READY)
+			break;
+		keep_alive();
+	} while (timeval_ms() - ts_start < timeout_ms);
+
+	if (!(intflag & SAMD_NVM_INTFLAG_READY)) {
+		LOG_ERROR("SAMD: NVM programming timed out");
+		return ERROR_FLASH_OPERATION_FAILED;
+	}
 
 	ret = target_read_u16(target,
 			SAMD_NVMCTRL + SAMD_NVMCTRL_STATUS, &status);
@@ -552,7 +567,8 @@ static int samd_issue_nvmctrl_command(struct target *target, uint16_t cmd)
 	}
 
 	/* Issue the NVM command */
-	res = target_write_u16(target,
+	/* 32-bit write is used to ensure atomic operation on ST-Link */
+	res = target_write_u32(target,
 			SAMD_NVMCTRL + SAMD_NVMCTRL_CTRLA, SAMD_NVM_CMD(cmd));
 	if (res != ERROR_OK)
 		return res;
@@ -606,7 +622,7 @@ static int samd_get_reservedmask(struct target *target, uint64_t *mask)
 	}
 	const struct samd_family *family;
 	family = samd_find_family(id);
-	if (family == NULL) {
+	if (!family) {
 		LOG_ERROR("Couldn't determine device family");
 		return ERROR_FAIL;
 	}
@@ -944,11 +960,6 @@ FLASH_BANK_COMMAND_HANDLER(samd_flash_bank_command)
 	return ERROR_OK;
 }
 
-COMMAND_HANDLER(samd_handle_info_command)
-{
-	return ERROR_OK;
-}
-
 COMMAND_HANDLER(samd_handle_chip_erase_command)
 {
 	struct target *target = get_current_target(CMD_CTX);
@@ -1051,31 +1062,6 @@ COMMAND_HANDLER(samd_handle_eeprom_command)
 	return res;
 }
 
-static COMMAND_HELPER(get_u64_from_hexarg, unsigned int num, uint64_t *value)
-{
-	if (num >= CMD_ARGC) {
-		command_print(CMD, "Too few Arguments.");
-		return ERROR_COMMAND_SYNTAX_ERROR;
-	}
-
-	if (strlen(CMD_ARGV[num]) >= 3 &&
-		CMD_ARGV[num][0] == '0' &&
-		CMD_ARGV[num][1] == 'x') {
-		char *check = NULL;
-		*value = strtoull(&(CMD_ARGV[num][2]), &check, 16);
-		if ((value == 0 && errno == ERANGE) ||
-			check == NULL || *check != 0) {
-			command_print(CMD, "Invalid 64-bit hex value in argument %d.",
-				num + 1);
-			return ERROR_COMMAND_SYNTAX_ERROR;
-		}
-	} else {
-		command_print(CMD, "Argument %d needs to be a hex value.", num + 1);
-		return ERROR_COMMAND_SYNTAX_ERROR;
-	}
-	return ERROR_OK;
-}
-
 COMMAND_HANDLER(samd_handle_nvmuserrow_command)
 {
 	int res = ERROR_OK;
@@ -1102,14 +1088,12 @@ COMMAND_HANDLER(samd_handle_nvmuserrow_command)
 			mask &= NVMUSERROW_LOCKBIT_MASK;
 
 			uint64_t value;
-			res = CALL_COMMAND_HANDLER(get_u64_from_hexarg, 0, &value);
-			if (res != ERROR_OK)
-				return res;
+			COMMAND_PARSE_NUMBER(u64, CMD_ARGV[0], value);
+
 			if (CMD_ARGC == 2) {
 				uint64_t mask_temp;
-				res = CALL_COMMAND_HANDLER(get_u64_from_hexarg, 1, &mask_temp);
-				if (res != ERROR_OK)
-					return res;
+				COMMAND_PARSE_NUMBER(u64, CMD_ARGV[1], mask_temp);
+
 				mask &= mask_temp;
 			}
 			res = samd_modify_user_row_masked(target, value, mask);
@@ -1234,14 +1218,6 @@ static const struct command_registration at91samd_exec_command_handlers[] = {
 		.handler = samd_handle_reset_deassert,
 		.mode = COMMAND_EXEC,
 		.help = "Deassert internal reset held by DSU.",
-		.usage = "",
-	},
-	{
-		.name = "info",
-		.handler = samd_handle_info_command,
-		.mode = COMMAND_EXEC,
-		.help = "Print information about the current at91samd chip "
-			"and its flash configuration.",
 		.usage = "",
 	},
 	{

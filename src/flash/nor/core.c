@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
+
 /***************************************************************************
  *   Copyright (C) 2005 by Dominic Rath <Dominic.Rath@gmx.de>              *
  *   Copyright (C) 2007-2010 Øyvind Harboe <oyvind.harboe@zylin.com>       *
@@ -5,19 +7,6 @@
  *   Copyright (C) 2009 Zachary T Welch <zw@superlucidity.net>             *
  *   Copyright (C) 2010 by Antonio Borneo <borneo.antonio@gmail.com>       *
  *   Copyright (C) 2017-2018 Tomas Vanek <vanekt@fbl.cz>                   *
- *                                                                         *
- *   This program is free software; you can redistribute it and/or modify  *
- *   it under the terms of the GNU General Public License as published by  *
- *   the Free Software Foundation; either version 2 of the License, or     *
- *   (at your option) any later version.                                   *
- *                                                                         *
- *   This program is distributed in the hope that it will be useful,       *
- *   but WITHOUT ANY WARRANTY; without even the implied warranty of        *
- *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the         *
- *   GNU General Public License for more details.                          *
- *                                                                         *
- *   You should have received a copy of the GNU General Public License     *
- *   along with this program.  If not, see <http://www.gnu.org/licenses/>. *
  ***************************************************************************/
 
 #ifdef HAVE_CONFIG_H
@@ -70,7 +59,7 @@ int flash_driver_protect(struct flash_bank *bank, int set, unsigned int first,
 	/* force "set" to 0/1 */
 	set = !!set;
 
-	if (bank->driver->protect == NULL) {
+	if (!bank->driver->protect) {
 		LOG_ERROR("Flash protection is not supported.");
 		return ERROR_FLASH_OPER_UNSUPPORTED;
 	}
@@ -179,7 +168,7 @@ void flash_bank_add(struct flash_bank *bank)
 	if (flash_banks) {
 		/* find last flash bank */
 		struct flash_bank *p = flash_banks;
-		while (NULL != p->next) {
+		while (p->next) {
 			bank_num += 1;
 			p = p->next;
 		}
@@ -257,7 +246,7 @@ struct flash_bank *get_flash_bank_by_name_noprobe(const char *name)
 	unsigned found = 0;
 
 	struct flash_bank *bank;
-	for (bank = flash_banks; NULL != bank; bank = bank->next) {
+	for (bank = flash_banks; bank; bank = bank->next) {
 		if (strcmp(bank->name, name) == 0)
 			return bank;
 		if (!flash_driver_name_matches(bank->driver->name, name))
@@ -275,7 +264,7 @@ int get_flash_bank_by_name(const char *name, struct flash_bank **bank_result)
 	int retval;
 
 	bank = get_flash_bank_by_name_noprobe(name);
-	if (bank != NULL) {
+	if (bank) {
 		retval = bank->driver->auto_probe(bank);
 
 		if (retval != ERROR_OK) {
@@ -293,7 +282,7 @@ int get_flash_bank_by_num(unsigned int num, struct flash_bank **bank)
 	struct flash_bank *p = get_flash_bank_by_num_noprobe(num);
 	int retval;
 
-	if (p == NULL)
+	if (!p)
 		return ERROR_FAIL;
 
 	retval = p->driver->auto_probe(p);
@@ -345,7 +334,7 @@ static int default_flash_mem_blank_check(struct flash_bank *bank)
 {
 	struct target *target = bank->target;
 	const int buffer_size = 1024;
-	uint32_t nBytes;
+	uint32_t n_bytes;
 	int retval = ERROR_OK;
 
 	if (bank->target->state != TARGET_HALTED) {
@@ -373,8 +362,8 @@ static int default_flash_mem_blank_check(struct flash_bank *bank)
 			if (retval != ERROR_OK)
 				goto done;
 
-			for (nBytes = 0; nBytes < chunk; nBytes++) {
-				if (buffer[nBytes] != bank->erased_value) {
+			for (n_bytes = 0; n_bytes < chunk; n_bytes++) {
+				if (buffer[n_bytes] != bank->erased_value) {
 					bank->sectors[i].is_erased = 0;
 					break;
 				}
@@ -400,7 +389,7 @@ int default_flash_blank_check(struct flash_bank *bank)
 
 	struct target_memory_check_block *block_array;
 	block_array = malloc(bank->num_sectors * sizeof(struct target_memory_check_block));
-	if (block_array == NULL)
+	if (!block_array)
 		return default_flash_mem_blank_check(bank);
 
 	for (unsigned int i = 0; i < bank->num_sectors; i++) {
@@ -429,7 +418,11 @@ int default_flash_blank_check(struct flash_bank *bank)
 			bank->sectors[i].is_erased = block_array[i].result;
 		retval = ERROR_OK;
 	} else {
-		LOG_USER("Running slow fallback erase check - add working memory");
+		if (retval == ERROR_NOT_IMPLEMENTED)
+			LOG_USER("Running slow fallback erase check");
+		else
+			LOG_USER("Running slow fallback erase check - add working memory");
+
 		retval = default_flash_mem_blank_check(bank);
 	}
 	free(block_array);
@@ -491,7 +484,7 @@ static int flash_iterate_address_range_inner(struct target *target,
 		return ERROR_FLASH_DST_BREAKS_ALIGNMENT;
 	}
 
-	if (c->prot_blocks == NULL || c->num_prot_blocks == 0) {
+	if (!c->prot_blocks || c->num_prot_blocks == 0) {
 		/* flash driver does not define protect blocks, use sectors instead */
 		iterate_protect_blocks = false;
 	}
@@ -791,7 +784,7 @@ int flash_write_unlock_verify(struct target *target, struct image *image,
 		retval = get_flash_bank_by_addr(target, run_address, false, &c);
 		if (retval != ERROR_OK)
 			goto done;
-		if (c == NULL) {
+		if (!c) {
 			LOG_WARNING("no flash bank found for address " TARGET_ADDR_FMT, run_address);
 			section++;	/* and skip it */
 			section_offset = 0;
@@ -903,7 +896,7 @@ int flash_write_unlock_verify(struct target *target, struct image *image,
 
 		/* allocate buffer */
 		buffer = malloc(run_size);
-		if (buffer == NULL) {
+		if (!buffer) {
 			LOG_ERROR("Out of memory for flash bank buffer");
 			retval = ERROR_FAIL;
 			goto done;
@@ -989,7 +982,7 @@ int flash_write_unlock_verify(struct target *target, struct image *image,
 			goto done;
 		}
 
-		if (written != NULL)
+		if (written)
 			*written += run_size;	/* add run size to total written counter */
 	}
 
@@ -1010,7 +1003,7 @@ struct flash_sector *alloc_block_array(uint32_t offset, uint32_t size,
 		unsigned int num_blocks)
 {
 	struct flash_sector *array = calloc(num_blocks, sizeof(struct flash_sector));
-	if (array == NULL)
+	if (!array)
 		return NULL;
 
 	for (unsigned int i = 0; i < num_blocks; i++) {

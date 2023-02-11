@@ -1,19 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
+
 /***************************************************************************
  *   Copyright (C) 2015 by Bogdan Kolbov                                   *
  *   kolbov@niiet.ru                                                       *
- *                                                                         *
- *   This program is free software; you can redistribute it and/or modify  *
- *   it under the terms of the GNU General Public License as published by  *
- *   the Free Software Foundation; either version 2 of the License, or     *
- *   (at your option) any later version.                                   *
- *                                                                         *
- *   This program is distributed in the hope that it will be useful,       *
- *   but WITHOUT ANY WARRANTY; without even the implied warranty of        *
- *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the         *
- *   GNU General Public License for more details.                          *
- *                                                                         *
- *   You should have received a copy of the GNU General Public License     *
- *   along with this program.  If not, see <http://www.gnu.org/licenses/>. *
  ***************************************************************************/
 
 #ifdef HAVE_CONFIG_H
@@ -1206,8 +1195,6 @@ static int niietcm4_erase(struct flash_bank *bank, unsigned int first,
 		retval = niietcm4_opstatus_check(bank);
 		if (retval != ERROR_OK)
 			return retval;
-
-		bank->sectors[i].is_erased = 1;
 	}
 
 	return retval;
@@ -1394,7 +1381,7 @@ static int niietcm4_write(struct flash_bank *bank, const uint8_t *buffer,
 	int rem = count % 16;
 	if (rem) {
 		new_buffer = malloc(count + 16 - rem);
-		if (new_buffer == NULL) {
+		if (!new_buffer) {
 			LOG_ERROR("Odd number of words to write and no memory for padding buffer");
 			return ERROR_FAIL;
 		}
@@ -1719,12 +1706,11 @@ static int niietcm4_auto_probe(struct flash_bank *bank)
 	return niietcm4_probe(bank);
 }
 
-static int get_niietcm4_info(struct flash_bank *bank, char *buf, int buf_size)
+static int get_niietcm4_info(struct flash_bank *bank, struct command_invocation *cmd)
 {
 	struct niietcm4_flash_bank *niietcm4_info = bank->driver_priv;
-	LOG_INFO("\nNIIET Cortex-M4F %s\n%s", niietcm4_info->chip_name, niietcm4_info->chip_brief);
-	snprintf(buf, buf_size, " ");
-
+	command_print_sameline(cmd, "\nNIIET Cortex-M4F %s\n%s",
+			niietcm4_info->chip_name, niietcm4_info->chip_brief);
 	return ERROR_OK;
 }
 

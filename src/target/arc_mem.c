@@ -1,11 +1,11 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
+
 /***************************************************************************
  *   Copyright (C) 2013-2014,2019-2020 Synopsys, Inc.                      *
  *   Frank Dols <frank.dols@synopsys.com>                                  *
  *   Mischa Jonker <mischa.jonker@synopsys.com>                            *
  *   Anton Kolesov <anton.kolesov@synopsys.com>                            *
  *   Evgeniy Didin <didin@synopsys.com>                                    *
- *                                                                         *
- *   SPDX-License-Identifier: GPL-2.0-or-later                             *
  ***************************************************************************/
 
 #ifdef HAVE_CONFIG_H
@@ -281,7 +281,7 @@ int arc_mem_read(struct target *target, target_addr_t address, uint32_t size,
 	/* arc_..._read_mem with size 4/2 returns uint32_t/uint16_t in host */
 	/* endianness, but byte array should represent target endianness      */
 
-	if (ERROR_OK == retval) {
+	if (retval == ERROR_OK) {
 		switch (size) {
 		case 4:
 			target_buffer_set_u32_array(target, buffer, count,

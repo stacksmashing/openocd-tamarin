@@ -1,22 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
+
 /***************************************************************************
  *   Copyright (C) 2015 by David Ung                                       *
  *                                                                         *
  *   Copyright (C) 2018 by Liviu Ionescu                                   *
  *   <ilg@livius.net>                                                      *
- *                                                                         *
- *   This program is free software; you can redistribute it and/or modify  *
- *   it under the terms of the GNU General Public License as published by  *
- *   the Free Software Foundation; either version 2 of the License, or     *
- *   (at your option) any later version.                                   *
- *                                                                         *
- *   This program is distributed in the hope that it will be useful,       *
- *   but WITHOUT ANY WARRANTY; without even the implied warranty of        *
- *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the         *
- *   GNU General Public License for more details.                          *
- *                                                                         *
- *   You should have received a copy of the GNU General Public License     *
- *   along with this program; if not, write to the                         *
- *   Free Software Foundation, Inc.,                                       *
  ***************************************************************************/
 
 #ifdef HAVE_CONFIG_H
@@ -76,6 +64,10 @@ static const struct {
 	{
 		.name = "HYP",
 		.psr = ARM_MODE_HYP,
+	},
+	{
+		.name = "UND",
+		.psr = ARM_MODE_UND,
 	},
 	{
 		.name = "SYS",
@@ -142,7 +134,7 @@ static int armv8_read_reg(struct armv8_common *armv8, int regnum, uint64_t *regv
 		retval = dpm->instr_read_data_r0_64(dpm,
 				ARMV8_MRS_DLR(0), &value_64);
 		break;
-	case ARMV8_xPSR:
+	case ARMV8_XPSR:
 		retval = dpm->instr_read_data_r0(dpm,
 				ARMV8_MRS_DSPSR(0), &value);
 		value_64 = value;
@@ -204,7 +196,7 @@ static int armv8_read_reg(struct armv8_common *armv8, int regnum, uint64_t *regv
 		break;
 	}
 
-	if (retval == ERROR_OK && regval != NULL)
+	if (retval == ERROR_OK && regval)
 		*regval = value_64;
 	else
 		retval = ERROR_FAIL;
@@ -257,7 +249,7 @@ static int armv8_write_reg(struct armv8_common *armv8, int regnum, uint64_t valu
 			ARMV8_MSR_DLR(0),
 			value_64);
 		break;
-	case ARMV8_xPSR:
+	case ARMV8_XPSR:
 		value = value_64;
 		retval = dpm->instr_write_data_r0(dpm,
 			ARMV8_MSR_DSPSR(0),
@@ -372,7 +364,7 @@ static int armv8_read_reg32(struct armv8_common *armv8, int regnum, uint64_t *re
 			ARMV8_MRC_DLR(0),
 			&value);
 		break;
-	case ARMV8_xPSR:
+	case ARMV8_XPSR:
 		retval = dpm->instr_read_data_r0(dpm,
 			ARMV8_MRC_DSPSR(0),
 			&value);
@@ -407,17 +399,17 @@ static int armv8_read_reg32(struct armv8_common *armv8, int regnum, uint64_t *re
 		break;
 	case ARMV8_SPSR_EL1: /* mapped to SPSR_svc */
 		retval = dpm->instr_read_data_r0(dpm,
-				ARMV8_MRS_xPSR_T1(1, 0),
+				ARMV8_MRS_XPSR_T1(1, 0),
 				&value);
 		break;
 	case ARMV8_SPSR_EL2: /* mapped to SPSR_hyp */
 		retval = dpm->instr_read_data_r0(dpm,
-				ARMV8_MRS_xPSR_T1(1, 0),
+				ARMV8_MRS_XPSR_T1(1, 0),
 				&value);
 		break;
 	case ARMV8_SPSR_EL3: /* mapped to SPSR_mon */
 		retval = dpm->instr_read_data_r0(dpm,
-				ARMV8_MRS_xPSR_T1(1, 0),
+				ARMV8_MRS_XPSR_T1(1, 0),
 				&value);
 		break;
 	case ARMV8_FPSR:
@@ -430,7 +422,7 @@ static int armv8_read_reg32(struct armv8_common *armv8, int regnum, uint64_t *re
 		break;
 	}
 
-	if (retval == ERROR_OK && regval != NULL)
+	if (retval == ERROR_OK && regval)
 		*regval = value;
 
 	return retval;
@@ -454,29 +446,31 @@ static int armv8_read_reg_simdfp_aarch32(struct armv8_common *armv8, int regnum,
 		retval = dpm->instr_read_data_r0(dpm,
 				ARMV4_5_VMOV(1, 1, 0, (num >> 4), (num & 0xf)),
 				&value_r0);
+		if (retval != ERROR_OK)
+			return retval;
 		/* read r1 via dcc */
 		retval = dpm->instr_read_data_dcc(dpm,
 				ARMV4_5_MCR(14, 0, 1, 0, 5, 0),
 				&value_r1);
-		if (retval == ERROR_OK) {
-			*lvalue = value_r1;
-			*lvalue = ((*lvalue) << 32) | value_r0;
-		} else
+		if (retval != ERROR_OK)
 			return retval;
+		*lvalue = value_r1;
+		*lvalue = ((*lvalue) << 32) | value_r0;
 
 		num++;
 		/* repeat above steps for high 64 bits of V register */
 		retval = dpm->instr_read_data_r0(dpm,
 				ARMV4_5_VMOV(1, 1, 0, (num >> 4), (num & 0xf)),
 				&value_r0);
+		if (retval != ERROR_OK)
+			return retval;
 		retval = dpm->instr_read_data_dcc(dpm,
 				ARMV4_5_MCR(14, 0, 1, 0, 5, 0),
 				&value_r1);
-		if (retval == ERROR_OK) {
-			*hvalue = value_r1;
-			*hvalue = ((*hvalue) << 32) | value_r0;
-		} else
+		if (retval != ERROR_OK)
 			return retval;
+		*hvalue = value_r1;
+		*hvalue = ((*hvalue) << 32) | value_r0;
 		break;
 	default:
 		retval = ERROR_FAIL;
@@ -506,7 +500,7 @@ static int armv8_write_reg32(struct armv8_common *armv8, int regnum, uint64_t va
 		retval = dpm->instr_write_data_r0(dpm,
 				ARMV8_MCR_DLR(0), value);
 		break;
-	case ARMV8_xPSR: /* CPSR */
+	case ARMV8_XPSR: /* CPSR */
 		/* read r0 from DCC, then "MCR r0, DSPSR" */
 		retval = dpm->instr_write_data_r0(dpm,
 				ARMV8_MCR_DSPSR(0), value);
@@ -541,17 +535,17 @@ static int armv8_write_reg32(struct armv8_common *armv8, int regnum, uint64_t va
 		break;
 	case ARMV8_SPSR_EL1: /* mapped to SPSR_svc */
 		retval = dpm->instr_write_data_r0(dpm,
-				ARMV8_MSR_GP_xPSR_T1(1, 0, 15),
+				ARMV8_MSR_GP_XPSR_T1(1, 0, 15),
 				value);
 		break;
 	case ARMV8_SPSR_EL2: /* mapped to SPSR_hyp */
 		retval = dpm->instr_write_data_r0(dpm,
-				ARMV8_MSR_GP_xPSR_T1(1, 0, 15),
+				ARMV8_MSR_GP_XPSR_T1(1, 0, 15),
 				value);
 		break;
 	case ARMV8_SPSR_EL3: /* mapped to SPSR_mon */
 		retval = dpm->instr_write_data_r0(dpm,
-				ARMV8_MSR_GP_xPSR_T1(1, 0, 15),
+				ARMV8_MSR_GP_XPSR_T1(1, 0, 15),
 				value);
 		break;
 	case ARMV8_FPSR:
@@ -586,12 +580,16 @@ static int armv8_write_reg_simdfp_aarch32(struct armv8_common *armv8, int regnum
 		retval = dpm->instr_write_data_dcc(dpm,
 			ARMV4_5_MRC(14, 0, 1, 0, 5, 0),
 			value_r1);
+		if (retval != ERROR_OK)
+			return retval;
 		/* write value_r0 to r0 via dcc then,
 		 * move to double word register from r0:r1: "vmov vm, r0, r1"
 		 */
 		retval = dpm->instr_write_data_r0(dpm,
 			ARMV4_5_VMOV(0, 1, 0, (num >> 4), (num & 0xf)),
 			value_r0);
+		if (retval != ERROR_OK)
+			return retval;
 
 		num++;
 		/* repeat above steps for high 64 bits of V register */
@@ -600,6 +598,8 @@ static int armv8_write_reg_simdfp_aarch32(struct armv8_common *armv8, int regnum
 		retval = dpm->instr_write_data_dcc(dpm,
 			ARMV4_5_MRC(14, 0, 1, 0, 5, 0),
 			value_r1);
+		if (retval != ERROR_OK)
+			return retval;
 		retval = dpm->instr_write_data_r0(dpm,
 			ARMV4_5_VMOV(0, 1, 0, (num >> 4), (num & 0xf)),
 			value_r0);
@@ -727,7 +727,7 @@ static void armv8_show_fault_registers32(struct armv8_common *armv8)
 	if (retval != ERROR_OK)
 		return;
 
-	/* ARMV4_5_MRC(cpnum, op1, r0, CRn, CRm, op2) */
+	/* ARMV4_5_MRC(cpnum, op1, r0, crn, crm, op2) */
 
 	/* c5/c0 - {data, instruction} fault status registers */
 	retval = dpm->instr_read_data_r0(dpm,
@@ -1025,7 +1025,7 @@ COMMAND_HANDLER(armv8_handle_exception_catch_command)
 	unsigned int argp = 0;
 	int retval;
 
-	static const Jim_Nvp nvp_ecatch_modes[] = {
+	static const struct jim_nvp nvp_ecatch_modes[] = {
 		{ .name = "off",       .value = 0 },
 		{ .name = "nsec_el1",  .value = (1 << 5) },
 		{ .name = "nsec_el2",  .value = (2 << 5) },
@@ -1035,7 +1035,7 @@ COMMAND_HANDLER(armv8_handle_exception_catch_command)
 		{ .name = "sec_el13",  .value = (5 << 1) },
 		{ .name = NULL, .value = -1 },
 	};
-	const Jim_Nvp *n;
+	const struct jim_nvp *n;
 
 	if (CMD_ARGC == 0) {
 		const char *sec = NULL, *nsec = NULL;
@@ -1045,15 +1045,15 @@ COMMAND_HANDLER(armv8_handle_exception_catch_command)
 		if (retval != ERROR_OK)
 			return retval;
 
-		n = Jim_Nvp_value2name_simple(nvp_ecatch_modes, edeccr & 0x0f);
-		if (n->name != NULL)
+		n = jim_nvp_value2name_simple(nvp_ecatch_modes, edeccr & 0x0f);
+		if (n->name)
 			sec = n->name;
 
-		n = Jim_Nvp_value2name_simple(nvp_ecatch_modes, edeccr & 0xf0);
-		if (n->name != NULL)
+		n = jim_nvp_value2name_simple(nvp_ecatch_modes, edeccr & 0xf0);
+		if (n->name)
 			nsec = n->name;
 
-		if (sec == NULL || nsec == NULL) {
+		if (!sec || !nsec) {
 			LOG_WARNING("Exception Catch: unknown exception catch configuration: EDECCR = %02" PRIx32, edeccr & 0xff);
 			return ERROR_FAIL;
 		}
@@ -1062,9 +1062,9 @@ COMMAND_HANDLER(armv8_handle_exception_catch_command)
 		return ERROR_OK;
 	}
 
-	while (CMD_ARGC > argp) {
-		n = Jim_Nvp_name2value_simple(nvp_ecatch_modes, CMD_ARGV[argp]);
-		if (n->name == NULL) {
+	while (argp < CMD_ARGC) {
+		n = jim_nvp_name2value_simple(nvp_ecatch_modes, CMD_ARGV[argp]);
+		if (!n->name) {
 			LOG_ERROR("Unknown option: %s", CMD_ARGV[argp]);
 			return ERROR_FAIL;
 		}
@@ -1098,13 +1098,6 @@ int armv8_handle_cache_info_command(struct command_invocation *cmd,
 
 static int armv8_setup_semihosting(struct target *target, int enable)
 {
-	struct arm *arm = target_to_arm(target);
-
-	if (arm->core_state != ARM_STATE_AARCH64) {
-		LOG_ERROR("semihosting only supported in AArch64 state\n");
-		return ERROR_FAIL;
-	}
-
 	return ERROR_OK;
 }
 
@@ -1176,8 +1169,7 @@ int armv8_arch_state(struct target *target)
 		armv8_show_fault_registers(target);
 
 	if (target->debug_reason == DBG_REASON_WATCHPOINT)
-		LOG_USER("Watchpoint triggered at PC %#08x",
-			(unsigned) armv8->dpm.wp_pc);
+		LOG_USER("Watchpoint triggered at " TARGET_ADDR_FMT, armv8->dpm.wp_addr);
 
 	return ERROR_OK;
 }
@@ -1372,7 +1364,7 @@ static const struct {
 
 	{ ARMV8_SP, "sp", 64, ARM_MODE_ANY, REG_TYPE_DATA_PTR, "general", "org.gnu.gdb.aarch64.core", NULL},
 	{ ARMV8_PC, "pc", 64, ARM_MODE_ANY, REG_TYPE_CODE_PTR, "general", "org.gnu.gdb.aarch64.core", NULL},
-	{ ARMV8_xPSR, "cpsr", 32, ARM_MODE_ANY, REG_TYPE_ARCH_DEFINED,
+	{ ARMV8_XPSR, "cpsr", 32, ARM_MODE_ANY, REG_TYPE_ARCH_DEFINED,
 		"general", "org.gnu.gdb.aarch64.core", aarch64_flags_cpsr},
 	{ ARMV8_V0,  "v0",  128, ARM_MODE_ANY, REG_TYPE_ARCH_DEFINED, "simdfp", "org.gnu.gdb.aarch64.fpu", aarch64v},
 	{ ARMV8_V1,  "v1",  128, ARM_MODE_ANY, REG_TYPE_ARCH_DEFINED, "simdfp", "org.gnu.gdb.aarch64.fpu", aarch64v},
@@ -1457,7 +1449,7 @@ static const struct {
 	{ ARMV8_R13, 0, "sp", 32, ARM_MODE_ANY, REG_TYPE_DATA_PTR, "general", "org.gnu.gdb.arm.core" },
 	{ ARMV8_R14, 0, "lr",  32, ARM_MODE_ANY, REG_TYPE_CODE_PTR, "general", "org.gnu.gdb.arm.core" },
 	{ ARMV8_PC, 0, "pc",   32, ARM_MODE_ANY, REG_TYPE_CODE_PTR, "general", "org.gnu.gdb.arm.core" },
-	{ ARMV8_xPSR, 0, "cpsr", 32, ARM_MODE_ANY, REG_TYPE_UINT32, "general", "org.gnu.gdb.arm.core" },
+	{ ARMV8_XPSR, 0, "cpsr", 32, ARM_MODE_ANY, REG_TYPE_UINT32, "general", "org.gnu.gdb.arm.core" },
 	{ ARMV8_V0, 0, "d0",  64, ARM_MODE_ANY, REG_TYPE_IEEE_DOUBLE, NULL, "org.gnu.gdb.arm.vfp"},
 	{ ARMV8_V0, 8, "d1",  64, ARM_MODE_ANY, REG_TYPE_IEEE_DOUBLE, NULL, "org.gnu.gdb.arm.vfp"},
 	{ ARMV8_V1, 0, "d2",  64, ARM_MODE_ANY, REG_TYPE_IEEE_DOUBLE, NULL, "org.gnu.gdb.arm.vfp"},
@@ -1652,7 +1644,7 @@ struct reg_cache *armv8_build_reg_cache(struct target *target)
 
 		reg_list[i].reg_data_type = calloc(1, sizeof(struct reg_data_type));
 		if (reg_list[i].reg_data_type) {
-			if (armv8_regs[i].data_type == NULL)
+			if (!armv8_regs[i].data_type)
 				reg_list[i].reg_data_type->type = armv8_regs[i].type;
 			else
 				*reg_list[i].reg_data_type = *armv8_regs[i].data_type;
@@ -1660,7 +1652,7 @@ struct reg_cache *armv8_build_reg_cache(struct target *target)
 			LOG_ERROR("unable to allocate reg type list");
 	}
 
-	arm->cpsr = reg_list + ARMV8_xPSR;
+	arm->cpsr = reg_list + ARMV8_XPSR;
 	arm->pc = reg_list + ARMV8_PC;
 	arm->core_cache = cache;
 
@@ -1738,7 +1730,7 @@ void armv8_free_reg_cache(struct target *target)
 	struct reg_cache *cache = NULL, *cache32 = NULL;
 
 	cache = arm->core_cache;
-	if (cache != NULL)
+	if (cache)
 		cache32 = cache->next;
 	armv8_free_cache(cache32, true);
 	armv8_free_cache(cache, false);
@@ -1831,7 +1823,7 @@ int armv8_set_dbgreg_bits(struct armv8_common *armv8, unsigned int reg, unsigned
 	/* Read register */
 	int retval = mem_ap_read_atomic_u32(armv8->debug_ap,
 			armv8->debug_base + reg, &tmp);
-	if (ERROR_OK != retval)
+	if (retval != ERROR_OK)
 		return retval;
 
 	/* clear bitfield */

@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 noinst_LTLIBRARIES += %D%/librtos.la
 %C%_librtos_la_SOURCES = \
 	%D%/rtos.c \
@@ -19,6 +21,7 @@ noinst_LTLIBRARIES += %D%/librtos.la
 	%D%/uCOS-III.c \
 	%D%/nuttx.c \
 	%D%/hwthread.c \
+	%D%/zephyr.c \
 	%D%/riot.c \
 	%D%/rtos.h \
 	%D%/rtos_standard_stackings.h \
@@ -30,10 +33,3 @@ noinst_LTLIBRARIES += %D%/librtos.la
 	%D%/rtos_riot_stackings.h \
 	%D%/rtos_ucos_iii_stackings.h \
 	%D%/nuttx_header.h
-
-%C%_librtos_la_CFLAGS = $(AM_CFLAGS)
-
-if IS_MINGW
-# FD_* macros are sloppy with their signs on MinGW32 platform
-%C%_librtos_la_CFLAGS += -Wno-sign-compare
-endif

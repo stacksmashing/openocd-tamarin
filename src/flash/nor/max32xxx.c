@@ -1,19 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
+
 /***************************************************************************
  *   Copyright (C) 2016 by Maxim Integrated                                *
  *   Kevin Gillespie <kevin.gillespie@maximintegrated.com>                 *
- *                                                                         *
- *   This program is free software; you can redistribute it and/or modify  *
- *   it under the terms of the GNU General Public License as published by  *
- *   the Free Software Foundation; either version 2 of the License, or     *
- *   (at your option) any later version.                                   *
- *                                                                         *
- *   This program is distributed in the hope that it will be useful,       *
- *   but WITHOUT ANY WARRANTY; without even the implied warranty of        *
- *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the         *
- *   GNU General Public License for more details.                          *
- *                                                                         *
- *   You should have received a copy of the GNU General Public License     *
- *   along with this program.  If not, see <http://www.gnu.org/licenses/>. *
  ***************************************************************************/
 
 #ifdef HAVE_CONFIG_H
@@ -21,6 +10,7 @@
 #endif
 
 #include "imp.h"
+#include <helper/binarybuffer.h>
 #include <target/algorithm.h>
 #include <target/armv7m.h>
 
@@ -113,17 +103,14 @@ FLASH_BANK_COMMAND_HANDLER(max32xxx_flash_bank_command)
 	return ERROR_OK;
 }
 
-static int get_info(struct flash_bank *bank, char *buf, int buf_size)
+static int get_info(struct flash_bank *bank, struct command_invocation *cmd)
 {
-	int printed;
 	struct max32xxx_flash_bank *info = bank->driver_priv;
 
 	if (!info->probed)
 		return ERROR_FLASH_BANK_NOT_PROBED;
 
-	printed = snprintf(buf, buf_size, "\nMaxim Integrated max32xxx flash driver\n");
-	buf += printed;
-	buf_size -= printed;
+	command_print_sameline(cmd, "\nMaxim Integrated max32xxx flash driver\n");
 	return ERROR_OK;
 }
 
@@ -305,8 +292,6 @@ static int max32xxx_erase(struct flash_bank *bank, unsigned int first,
 			max32xxx_flash_op_post(bank);
 			return ERROR_FLASH_OPERATION_FAILED;
 		}
-
-		bank->sectors[banknr].is_erased = 1;
 	}
 
 	if (!erased) {
@@ -771,16 +756,12 @@ COMMAND_HANDLER(max32xxx_handle_mass_erase_command)
 		return ERROR_OK;
 	}
 
-	if (ERROR_OK != retval)
+	if (retval != ERROR_OK)
 		return retval;
 
-	if (max32xxx_mass_erase(bank) == ERROR_OK) {
-		/* set all sectors as erased */
-		for (unsigned i = 0; i < bank->num_sectors; i++)
-			bank->sectors[i].is_erased = 1;
-
+	if (max32xxx_mass_erase(bank) == ERROR_OK)
 		command_print(CMD, "max32xxx mass erase complete");
-	} else
+	else
 		command_print(CMD, "max32xxx mass erase failed");
 
 	return ERROR_OK;
@@ -799,12 +780,12 @@ COMMAND_HANDLER(max32xxx_handle_protection_set_command)
 	}
 
 	retval = CALL_COMMAND_HANDLER(flash_command_get_bank, 0, &bank);
-	if (ERROR_OK != retval)
+	if (retval != ERROR_OK)
 		return retval;
 	info = bank->driver_priv;
 
 	/* Convert the range to the page numbers */
-	if (1 != sscanf(CMD_ARGV[1], "0x%"SCNx32, &addr)) {
+	if (sscanf(CMD_ARGV[1], "0x%"SCNx32, &addr) != 1) {
 		LOG_WARNING("Error parsing address");
 		command_print(CMD, "max32xxx protection_set <bank> <addr> <size>");
 		return ERROR_FAIL;
@@ -812,7 +793,7 @@ COMMAND_HANDLER(max32xxx_handle_protection_set_command)
 	/* Mask off the top portion on the address */
 	addr = (addr & 0x0FFFFFFF);
 
-	if (1 != sscanf(CMD_ARGV[2], "0x%"SCNx32, &len)) {
+	if (sscanf(CMD_ARGV[2], "0x%"SCNx32, &len) != 1) {
 		LOG_WARNING("Error parsing length");
 		command_print(CMD, "max32xxx protection_set <bank> <addr> <size>");
 		return ERROR_FAIL;
@@ -855,12 +836,12 @@ COMMAND_HANDLER(max32xxx_handle_protection_clr_command)
 	}
 
 	retval = CALL_COMMAND_HANDLER(flash_command_get_bank, 0, &bank);
-	if (ERROR_OK != retval)
+	if (retval != ERROR_OK)
 		return retval;
 	info = bank->driver_priv;
 
 	/* Convert the range to the page numbers */
-	if (1 != sscanf(CMD_ARGV[1], "0x%"SCNx32, &addr)) {
+	if (sscanf(CMD_ARGV[1], "0x%"SCNx32, &addr) != 1) {
 		LOG_WARNING("Error parsing address");
 		command_print(CMD, "max32xxx protection_clr <bank> <addr> <size>");
 		return ERROR_FAIL;
@@ -868,7 +849,7 @@ COMMAND_HANDLER(max32xxx_handle_protection_clr_command)
 	/* Mask off the top portion on the address */
 	addr = (addr & 0x0FFFFFFF);
 
-	if (1 != sscanf(CMD_ARGV[2], "0x%"SCNx32, &len)) {
+	if (sscanf(CMD_ARGV[2], "0x%"SCNx32, &len) != 1) {
 		LOG_WARNING("Error parsing length");
 		command_print(CMD, "max32xxx protection_clr <bank> <addr> <size>");
 		return ERROR_FAIL;
@@ -910,13 +891,13 @@ COMMAND_HANDLER(max32xxx_handle_protection_check_command)
 	}
 
 	retval = CALL_COMMAND_HANDLER(flash_command_get_bank, 0, &bank);
-	if (ERROR_OK != retval)
+	if (retval != ERROR_OK)
 		return retval;
 	info = bank->driver_priv;
 
 	/* Update the protection array */
 	retval = max32xxx_protect_check(bank);
-	if (ERROR_OK != retval) {
+	if (retval != ERROR_OK) {
 		LOG_WARNING("Error updating the protection array");
 		return retval;
 	}

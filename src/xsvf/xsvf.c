@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
+
 /***************************************************************************
  *   Copyright (C) 2005 by Dominic Rath                                    *
  *   Dominic.Rath@gmx.de                                                   *
@@ -10,19 +12,6 @@
  *                                                                         *
  *   Copyright (C) 2009 SoftPLC Corporation. http://softplc.com            *
  *   Dick Hollenbeck <dick@softplc.com>                                    *
- *                                                                         *
- *   This program is free software; you can redistribute it and/or modify  *
- *   it under the terms of the GNU General Public License as published by  *
- *   the Free Software Foundation; either version 2 of the License, or     *
- *   (at your option) any later version.                                   *
- *                                                                         *
- *   This program is distributed in the hope that it will be useful,       *
- *   but WITHOUT ANY WARRANTY; without even the implied warranty of        *
- *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the         *
- *   GNU General Public License for more details.                          *
- *                                                                         *
- *   You should have received a copy of the GNU General Public License     *
- *   along with this program.  If not, see <http://www.gnu.org/licenses/>. *
  ***************************************************************************/
 
 /* The specification for SVF is available here:
@@ -39,6 +28,7 @@
 #endif
 
 #include "xsvf.h"
+#include "helper/system.h"
 #include <jtag/jtag.h>
 #include <svf/svf.h>
 
@@ -486,7 +476,7 @@ COMMAND_HANDLER(handle_xsvf_command)
 					field.out_value = dr_out_buf;
 					field.in_value = calloc(DIV_ROUND_UP(field.num_bits, 8), 1);
 
-					if (tap == NULL)
+					if (!tap)
 						jtag_add_plain_dr_scan(field.num_bits,
 								field.out_value,
 								field.in_value,
@@ -695,7 +685,7 @@ COMMAND_HANDLER(handle_xsvf_command)
 
 					field.in_value = NULL;
 
-					if (tap == NULL)
+					if (!tap)
 						jtag_add_plain_ir_scan(field.num_bits,
 								field.out_value, field.in_value, my_end_state);
 					else
@@ -929,7 +919,7 @@ COMMAND_HANDLER(handle_xsvf_command)
 					if (attempt > 0 && verbose)
 						LOG_USER("LSDR retry %d", attempt);
 
-					if (tap == NULL)
+					if (!tap)
 						jtag_add_plain_dr_scan(field.num_bits,
 								field.out_value,
 								field.in_value,
@@ -1056,7 +1046,7 @@ int xsvf_register_commands(struct command_context *cmd_ctx)
 
 /*
 
-PSUEDO-Code from Xilinx Appnote XAPP067.pdf :
+PSEUDO-Code from Xilinx Appnote XAPP067.pdf :
 
 the following pseudo code clarifies the intent of the xrepeat support.The
 flow given is for the entire processing of an SVF file, not an XSVF file.

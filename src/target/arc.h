@@ -1,11 +1,11 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
+
 /***************************************************************************
  *   Copyright (C) 2013-2015,2019-2020 Synopsys, Inc.                      *
  *   Frank Dols <frank.dols@synopsys.com>                                  *
  *   Mischa Jonker <mischa.jonker@synopsys.com>                            *
  *   Anton Kolesov <anton.kolesov@synopsys.com>                            *
  *   Evgeniy Didin <didin@synopsys.com>                                    *
- *                                                                         *
- *   SPDX-License-Identifier: GPL-2.0-or-later                             *
  ***************************************************************************/
 
 #ifndef OPENOCD_TARGET_ARC_H
@@ -27,7 +27,7 @@
 #include "arc_cmd.h"
 #include "arc_mem.h"
 
-#define ARC_COMMON_MAGIC	0xB32EB324  /* just a unique number */
+#define ARC_COMMON_MAGIC	0xB32EB324U  /* just a unique number */
 
 #define AUX_DEBUG_REG                   0x5
 #define AUX_PC_REG                      0x6
@@ -45,9 +45,52 @@
 #define AUX_STATUS32_REG_HALT_BIT       BIT(0)
 #define AUX_STATUS32_REG_IE_BIT         BIT(31)    /* STATUS32[31] = IE field */
 
-/* Reserved core registers */
-#define CORE_R61_NUM			(61)
-#define CORE_R62_NUM			(62)
+/* ARC register numbers */
+enum {
+	ARC_R0,
+	ARC_R1,
+	ARC_R2,
+	ARC_R3,
+	ARC_R4,
+	ARC_R5,
+	ARC_R6,
+	ARC_R7,
+	ARC_R8,
+	ARC_R9,
+	ARC_R10,
+	ARC_R11,
+	ARC_R12,
+	ARC_R13,
+	ARC_R14,
+	ARC_R15,
+	ARC_R16,
+	ARC_R17,
+	ARC_R18,
+	ARC_R19,
+	ARC_R20,
+	ARC_R21,
+	ARC_R22,
+	ARC_R23,
+	ARC_R24,
+	ARC_R25,
+	ARC_GP		= 26,
+	ARC_FP		= 27,
+	ARC_SP		= 28,
+	ARC_ILINK	= 29,
+	ARC_R30,
+	ARC_BLINK	= 31,
+	ARC_LP_COUNT	= 60,
+
+	/* Reserved registers */
+	ARC_R61		= 61,
+	ARC_R62		= 62,
+
+	ARC_PCL		= 63,
+	ARC_PC		= 64,
+	ARC_LP_START	= 65,
+	ARC_LP_END	= 66,
+	ARC_STATUS32	= 67,
+};
 
 #define CORE_REG_MAX_NUMBER		(63)
 
@@ -140,7 +183,7 @@ struct arc_actionpoint {
 };
 
 struct arc_common {
-	uint32_t common_magic;
+	unsigned int common_magic;
 
 	struct arc_jtag jtag_info;
 
@@ -163,7 +206,7 @@ struct arc_common {
 	bool dcache_invalidated;
 	bool l2cache_invalidated;
 
-	/* Indicate if cach was built (for deinit function) */
+	/* Indicate if cache was built (for deinit function) */
 	bool core_aux_cache_built;
 	bool bcr_cache_built;
 	/* Closely Coupled memory(CCM) regions for performance-critical

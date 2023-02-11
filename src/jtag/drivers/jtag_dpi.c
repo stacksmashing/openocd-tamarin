@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
+
 /*
  * JTAG to DPI driver
  *
@@ -7,19 +9,6 @@
  *
  * See file CREDITS for list of people who contributed to this
  * project.
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License as
- * published by the Free Software Foundation; either version 2 of
- * the License, or (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
 #ifdef HAVE_CONFIG_H
@@ -49,7 +38,7 @@ static int last_ir_num_bits;
 
 static int write_sock(char *buf, size_t len)
 {
-	if (buf == NULL) {
+	if (!buf) {
 		LOG_ERROR("%s: NULL 'buf' argument, file %s, line %d",
 			__func__, __FILE__, __LINE__);
 		return ERROR_FAIL;
@@ -64,7 +53,7 @@ static int write_sock(char *buf, size_t len)
 
 static int read_sock(char *buf, size_t len)
 {
-	if (buf == NULL) {
+	if (!buf) {
 		LOG_ERROR("%s: NULL 'buf' argument, file %s, line %d",
 			__func__, __FILE__, __LINE__);
 		return ERROR_FAIL;
@@ -123,7 +112,7 @@ static int jtag_dpi_scan(struct scan_command *cmd)
 	int ret = ERROR_OK;
 
 	num_bits = jtag_build_buffer(cmd, &data_buf);
-	if (data_buf == NULL) {
+	if (!data_buf) {
 		LOG_ERROR("jtag_build_buffer call failed, data_buf == NULL, "
 			"file %s, line %d", __FILE__, __LINE__);
 		return ERROR_FAIL;
@@ -133,7 +122,7 @@ static int jtag_dpi_scan(struct scan_command *cmd)
 	if (cmd->ir_scan) {
 		free(last_ir_buf);
 		last_ir_buf = (uint8_t *)malloc(bytes * sizeof(uint8_t));
-		if (last_ir_buf == NULL) {
+		if (!last_ir_buf) {
 			LOG_ERROR("%s: malloc fail, file %s, line %d",
 				__func__, __FILE__, __LINE__);
 			ret = ERROR_FAIL;
@@ -181,7 +170,7 @@ static int jtag_dpi_runtest(int cycles)
 	int num_bits = last_ir_num_bits, bytes;
 	int ret = ERROR_OK;
 
-	if (data_buf == NULL) {
+	if (!data_buf) {
 		LOG_ERROR("%s: NULL 'data_buf' argument, file %s, line %d",
 			__func__, __FILE__, __LINE__);
 		return ERROR_FAIL;
@@ -194,7 +183,7 @@ static int jtag_dpi_runtest(int cycles)
 
 	bytes = DIV_ROUND_UP(num_bits, 8);
 	read_scan = (uint8_t *)malloc(bytes * sizeof(uint8_t));
-	if (read_scan == NULL) {
+	if (!read_scan) {
 		LOG_ERROR("%s: malloc fail, file %s, line %d",
 			__func__, __FILE__, __LINE__);
 		return ERROR_FAIL;
@@ -238,7 +227,7 @@ static int jtag_dpi_execute_queue(void)
 	struct jtag_command *cmd;
 	int ret = ERROR_OK;
 
-	for (cmd = jtag_command_queue; ret == ERROR_OK && cmd != NULL;
+	for (cmd = jtag_command_queue; ret == ERROR_OK && cmd;
 	     cmd = cmd->next) {
 		switch (cmd->type) {
 		case JTAG_RUNTEST:
@@ -289,9 +278,9 @@ static int jtag_dpi_init(void)
 	serv_addr.sin_family = AF_INET;
 	serv_addr.sin_port = htons(server_port);
 
-	if (server_address == NULL) {
+	if (!server_address) {
 		server_address = strdup(SERVER_ADDRESS);
-		if (server_address == NULL) {
+		if (!server_address) {
 			LOG_ERROR("%s: strdup fail, file %s, line %d",
 				__func__, __FILE__, __LINE__);
 			return ERROR_FAIL;
@@ -301,7 +290,7 @@ static int jtag_dpi_init(void)
 	serv_addr.sin_addr.s_addr = inet_addr(server_address);
 
 	if (serv_addr.sin_addr.s_addr == INADDR_NONE) {
-		LOG_ERROR("inet_addr error occured");
+		LOG_ERROR("inet_addr error occurred");
 		return ERROR_FAIL;
 	}
 
@@ -350,9 +339,9 @@ COMMAND_HANDLER(jtag_dpi_set_address)
 	if (CMD_ARGC > 1)
 		return ERROR_COMMAND_SYNTAX_ERROR;
 	else if (CMD_ARGC == 0) {
-		if (server_address == NULL) {
+		if (!server_address) {
 			server_address = strdup(SERVER_ADDRESS);
-			if (server_address == NULL) {
+			if (!server_address) {
 				LOG_ERROR("%s: strdup fail, file %s, line %d",
 					__func__, __FILE__, __LINE__);
 				return ERROR_FAIL;
@@ -362,7 +351,7 @@ COMMAND_HANDLER(jtag_dpi_set_address)
 	} else {
 		free(server_address);
 		server_address = strdup(CMD_ARGV[0]);
-		if (server_address == NULL) {
+		if (!server_address) {
 			LOG_ERROR("%s: strdup fail, file %s, line %d",
 				__func__, __FILE__, __LINE__);
 			return ERROR_FAIL;
@@ -373,20 +362,31 @@ COMMAND_HANDLER(jtag_dpi_set_address)
 	return ERROR_OK;
 }
 
-static const struct command_registration jtag_dpi_command_handlers[] = {
+static const struct command_registration jtag_dpi_subcommand_handlers[] = {
 	{
-		.name = "jtag_dpi_set_port",
+		.name = "set_port",
 		.handler = &jtag_dpi_set_port,
 		.mode = COMMAND_CONFIG,
 		.help = "set the port of the DPI server",
 		.usage = "[port]",
 	},
 	{
-		.name = "jtag_dpi_set_address",
+		.name = "set_address",
 		.handler = &jtag_dpi_set_address,
 		.mode = COMMAND_CONFIG,
 		.help = "set the address of the DPI server",
 		.usage = "[address]",
+	},
+	COMMAND_REGISTRATION_DONE
+};
+
+static const struct command_registration jtag_dpi_command_handlers[] = {
+	{
+		.name = "jtag_dpi",
+		.mode = COMMAND_ANY,
+		.help = "perform jtag_dpi management",
+		.chain = jtag_dpi_subcommand_handlers,
+		.usage = "",
 	},
 	COMMAND_REGISTRATION_DONE
 };

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
+
 /***************************************************************************
  *   Copyright (C) 2005 by Dominic Rath                                    *
  *   Dominic.Rath@gmx.de                                                   *
@@ -17,19 +19,6 @@
  *   Copyright (C) 2019 by Tomas Vanek                                     *
  *   vanekt@fbl.cz                                                         *
  *                                                                         *
- *   This program is free software; you can redistribute it and/or modify  *
- *   it under the terms of the GNU General Public License as published by  *
- *   the Free Software Foundation; either version 2 of the License, or     *
- *   (at your option) any later version.                                   *
- *                                                                         *
- *   This program is distributed in the hope that it will be useful,       *
- *   but WITHOUT ANY WARRANTY; without even the implied warranty of        *
- *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the         *
- *   GNU General Public License for more details.                          *
- *                                                                         *
- *   You should have received a copy of the GNU General Public License     *
- *   along with this program.  If not, see <http://www.gnu.org/licenses/>. *
- *                                                                         *
  *   ARMv7-M Architecture, Application Level Reference Manual              *
  *              ARM DDI 0405C (September 2008)                             *
  *                                                                         *
@@ -44,6 +33,8 @@
 #include "algorithm.h"
 #include "register.h"
 #include "semihosting_common.h"
+#include <helper/log.h>
+#include <helper/binarybuffer.h>
 
 #if 0
 #define _DEBUG_INSTRUCTION_EXECUTION_
@@ -62,7 +53,7 @@ const int armv7m_psp_reg_map[ARMV7M_NUM_CORE_REGS] = {
 	ARMV7M_R4, ARMV7M_R5, ARMV7M_R6, ARMV7M_R7,
 	ARMV7M_R8, ARMV7M_R9, ARMV7M_R10, ARMV7M_R11,
 	ARMV7M_R12, ARMV7M_PSP, ARMV7M_R14, ARMV7M_PC,
-	ARMV7M_xPSR,
+	ARMV7M_XPSR,
 };
 
 /* MSP is used in handler and some thread modes */
@@ -71,7 +62,7 @@ const int armv7m_msp_reg_map[ARMV7M_NUM_CORE_REGS] = {
 	ARMV7M_R4, ARMV7M_R5, ARMV7M_R6, ARMV7M_R7,
 	ARMV7M_R8, ARMV7M_R9, ARMV7M_R10, ARMV7M_R11,
 	ARMV7M_R12, ARMV7M_MSP, ARMV7M_R14, ARMV7M_PC,
-	ARMV7M_xPSR,
+	ARMV7M_XPSR,
 };
 
 /*
@@ -106,7 +97,7 @@ static const struct {
 	{ ARMV7M_R13, "sp", 32, REG_TYPE_DATA_PTR, "general", "org.gnu.gdb.arm.m-profile" },
 	{ ARMV7M_R14, "lr", 32, REG_TYPE_INT, "general", "org.gnu.gdb.arm.m-profile" },
 	{ ARMV7M_PC, "pc", 32, REG_TYPE_CODE_PTR, "general", "org.gnu.gdb.arm.m-profile" },
-	{ ARMV7M_xPSR, "xPSR", 32, REG_TYPE_INT, "general", "org.gnu.gdb.arm.m-profile" },
+	{ ARMV7M_XPSR, "xPSR", 32, REG_TYPE_INT, "general", "org.gnu.gdb.arm.m-profile" },
 
 	{ ARMV7M_MSP, "msp", 32, REG_TYPE_DATA_PTR, "system", "org.gnu.gdb.arm.m-system" },
 	{ ARMV7M_PSP, "psp", 32, REG_TYPE_DATA_PTR, "system", "org.gnu.gdb.arm.m-system" },
@@ -125,6 +116,29 @@ static const struct {
 	{ ARMV7M_FAULTMASK, "faultmask", 1, REG_TYPE_INT8, "system", "org.gnu.gdb.arm.m-system" },
 	{ ARMV7M_CONTROL, "control", 3, REG_TYPE_INT8, "system", "org.gnu.gdb.arm.m-system" },
 
+	/* ARMv8-M security extension (TrustZone) specific registers */
+	{ ARMV8M_MSP_NS, "msp_ns", 32, REG_TYPE_DATA_PTR, "stack", "org.gnu.gdb.arm.secext" },
+	{ ARMV8M_PSP_NS, "psp_ns", 32, REG_TYPE_DATA_PTR, "stack", "org.gnu.gdb.arm.secext" },
+	{ ARMV8M_MSP_S, "msp_s", 32, REG_TYPE_DATA_PTR, "stack", "org.gnu.gdb.arm.secext" },
+	{ ARMV8M_PSP_S, "psp_s", 32, REG_TYPE_DATA_PTR, "stack", "org.gnu.gdb.arm.secext" },
+	{ ARMV8M_MSPLIM_S, "msplim_s", 32, REG_TYPE_DATA_PTR, "stack", "org.gnu.gdb.arm.secext" },
+	{ ARMV8M_PSPLIM_S, "psplim_s", 32, REG_TYPE_DATA_PTR, "stack", "org.gnu.gdb.arm.secext" },
+	{ ARMV8M_MSPLIM_NS, "msplim_ns", 32, REG_TYPE_DATA_PTR, "stack", "org.gnu.gdb.arm.secext" },
+	{ ARMV8M_PSPLIM_NS, "psplim_ns", 32, REG_TYPE_DATA_PTR, "stack", "org.gnu.gdb.arm.secext" },
+
+	{ ARMV8M_PMSK_BPRI_FLTMSK_CTRL_S, "pmsk_bpri_fltmsk_ctrl_s", 32, REG_TYPE_INT, NULL, NULL },
+	{ ARMV8M_PRIMASK_S, "primask_s", 1, REG_TYPE_INT8, "system", "org.gnu.gdb.arm.secext" },
+	{ ARMV8M_BASEPRI_S, "basepri_s", 8, REG_TYPE_INT8, "system", "org.gnu.gdb.arm.secext" },
+	{ ARMV8M_FAULTMASK_S, "faultmask_s", 1, REG_TYPE_INT8, "system", "org.gnu.gdb.arm.secext" },
+	{ ARMV8M_CONTROL_S, "control_s", 3, REG_TYPE_INT8, "system", "org.gnu.gdb.arm.secext" },
+
+	{ ARMV8M_PMSK_BPRI_FLTMSK_CTRL_NS, "pmsk_bpri_fltmsk_ctrl_ns", 32, REG_TYPE_INT, NULL, NULL },
+	{ ARMV8M_PRIMASK_NS, "primask_ns", 1, REG_TYPE_INT8, "system", "org.gnu.gdb.arm.secext" },
+	{ ARMV8M_BASEPRI_NS, "basepri_ns", 8, REG_TYPE_INT8, "system", "org.gnu.gdb.arm.secext" },
+	{ ARMV8M_FAULTMASK_NS, "faultmask_ns", 1, REG_TYPE_INT8, "system", "org.gnu.gdb.arm.secext" },
+	{ ARMV8M_CONTROL_NS, "control_ns", 3, REG_TYPE_INT8, "system", "org.gnu.gdb.arm.secext" },
+
+	/* FPU registers */
 	{ ARMV7M_D0, "d0", 64, REG_TYPE_IEEE_DOUBLE, "float", "org.gnu.gdb.arm.vfp" },
 	{ ARMV7M_D1, "d1", 64, REG_TYPE_IEEE_DOUBLE, "float", "org.gnu.gdb.arm.vfp" },
 	{ ARMV7M_D2, "d2", 64, REG_TYPE_IEEE_DOUBLE, "float", "org.gnu.gdb.arm.vfp" },
@@ -166,10 +180,10 @@ int armv7m_restore_context(struct target *target)
 	 * packing of ARMV7M_PMSK_BPRI_FLTMSK_CTRL!
 	 * See also comments in the register table above */
 	for (i = cache->num_regs - 1; i >= 0; i--) {
-		if (cache->reg_list[i].dirty) {
-			armv7m->arm.write_core_reg(target, &cache->reg_list[i], i,
-						   ARM_MODE_ANY, cache->reg_list[i].value);
-		}
+		struct reg *r = &cache->reg_list[i];
+
+		if (r->exist && r->dirty)
+			armv7m->arm.write_core_reg(target, r, i, ARM_MODE_ANY, r->value);
 	}
 
 	return ERROR_OK;
@@ -226,12 +240,12 @@ static int armv7m_set_core_reg(struct reg *reg, uint8_t *buf)
 	return ERROR_OK;
 }
 
-static uint32_t armv7m_map_id_to_regsel(unsigned int arm_reg_id)
+uint32_t armv7m_map_id_to_regsel(unsigned int arm_reg_id)
 {
 	switch (arm_reg_id) {
 	case ARMV7M_R0 ... ARMV7M_R14:
 	case ARMV7M_PC:
-	case ARMV7M_xPSR:
+	case ARMV7M_XPSR:
 	case ARMV7M_MSP:
 	case ARMV7M_PSP:
 		/* NOTE:  we "know" here that the register identifiers
@@ -242,6 +256,15 @@ static uint32_t armv7m_map_id_to_regsel(unsigned int arm_reg_id)
 
 	case ARMV7M_PMSK_BPRI_FLTMSK_CTRL:
 		return ARMV7M_REGSEL_PMSK_BPRI_FLTMSK_CTRL;
+
+	case ARMV8M_MSP_NS...ARMV8M_PSPLIM_NS:
+		return arm_reg_id - ARMV8M_MSP_NS + ARMV8M_REGSEL_MSP_NS;
+
+	case ARMV8M_PMSK_BPRI_FLTMSK_CTRL_S:
+		return ARMV8M_REGSEL_PMSK_BPRI_FLTMSK_CTRL_S;
+
+	case ARMV8M_PMSK_BPRI_FLTMSK_CTRL_NS:
+		return ARMV8M_REGSEL_PMSK_BPRI_FLTMSK_CTRL_NS;
 
 	case ARMV7M_FPSCR:
 		return ARMV7M_REGSEL_FPSCR;
@@ -255,31 +278,29 @@ static uint32_t armv7m_map_id_to_regsel(unsigned int arm_reg_id)
 	}
 }
 
-static bool armv7m_map_reg_packing(unsigned int arm_reg_id,
+bool armv7m_map_reg_packing(unsigned int arm_reg_id,
 					unsigned int *reg32_id, uint32_t *offset)
 {
+
 	switch (arm_reg_id) {
 
-	case ARMV7M_PRIMASK:
+	case ARMV7M_PRIMASK...ARMV7M_CONTROL:
 		*reg32_id = ARMV7M_PMSK_BPRI_FLTMSK_CTRL;
-		*offset = 0;
+		*offset = arm_reg_id - ARMV7M_PRIMASK;
 		return true;
-	case ARMV7M_BASEPRI:
-		*reg32_id = ARMV7M_PMSK_BPRI_FLTMSK_CTRL;
-		*offset = 1;
+	case ARMV8M_PRIMASK_S...ARMV8M_CONTROL_S:
+		*reg32_id = ARMV8M_PMSK_BPRI_FLTMSK_CTRL_S;
+		*offset = arm_reg_id - ARMV8M_PRIMASK_S;
 		return true;
-	case ARMV7M_FAULTMASK:
-		*reg32_id = ARMV7M_PMSK_BPRI_FLTMSK_CTRL;
-		*offset = 2;
-		return true;
-	case ARMV7M_CONTROL:
-		*reg32_id = ARMV7M_PMSK_BPRI_FLTMSK_CTRL;
-		*offset = 3;
+	case ARMV8M_PRIMASK_NS...ARMV8M_CONTROL_NS:
+		*reg32_id = ARMV8M_PMSK_BPRI_FLTMSK_CTRL_NS;
+		*offset = arm_reg_id - ARMV8M_PRIMASK_NS;
 		return true;
 
 	default:
 		return false;
 	}
+
 }
 
 static int armv7m_read_core_reg(struct target *target, struct reg *r,
@@ -299,11 +320,17 @@ static int armv7m_read_core_reg(struct target *target, struct reg *r,
 
 	if (r->size <= 8) {
 		/* any 8-bit or shorter register is packed */
-		uint32_t offset = 0;	/* silence false gcc warning */
+		uint32_t offset;
 		unsigned int reg32_id;
 
 		bool is_packed = armv7m_map_reg_packing(num, &reg32_id, &offset);
-		assert(is_packed);
+		if (!is_packed) {
+			/* We should not get here as all 8-bit or shorter registers
+			 * are packed */
+			assert(false);
+			/* assert() does nothing if NDEBUG is defined */
+			return ERROR_FAIL;
+		}
 		struct reg *r32 = &armv7m->arm.core_cache->reg_list[reg32_id];
 
 		/* Read 32-bit container register if not cached */
@@ -364,11 +391,17 @@ static int armv7m_write_core_reg(struct target *target, struct reg *r,
 
 	if (r->size <= 8) {
 		/* any 8-bit or shorter register is packed */
-		uint32_t offset = 0;	/* silence false gcc warning */
+		uint32_t offset;
 		unsigned int reg32_id;
 
 		bool is_packed = armv7m_map_reg_packing(num, &reg32_id, &offset);
-		assert(is_packed);
+		if (!is_packed) {
+			/* We should not get here as all 8-bit or shorter registers
+			 * are packed */
+			assert(false);
+			/* assert() does nothing if NDEBUG is defined */
+			return ERROR_FAIL;
+		}
 		struct reg *r32 = &armv7m->arm.core_cache->reg_list[reg32_id];
 
 		if (!r32->valid) {
@@ -432,7 +465,7 @@ int armv7m_get_gdb_reg_list(struct target *target, struct reg **reg_list[],
 		size = ARMV7M_NUM_CORE_REGS;
 
 	*reg_list = malloc(sizeof(struct reg *) * size);
-	if (*reg_list == NULL)
+	if (!*reg_list)
 		return ERROR_FAIL;
 
 	for (i = 0; i < size; i++)
@@ -495,11 +528,17 @@ int armv7m_start_algorithm(struct target *target,
 
 	/* Store all non-debug execution registers to armv7m_algorithm_info context */
 	for (unsigned i = 0; i < armv7m->arm.core_cache->num_regs; i++) {
+		struct reg *reg = &armv7m->arm.core_cache->reg_list[i];
+		if (!reg->exist)
+			continue;
 
-		armv7m_algorithm_info->context[i] = buf_get_u32(
-				armv7m->arm.core_cache->reg_list[i].value,
-				0,
-				32);
+		if (!reg->valid)
+			armv7m_get_core_reg(reg);
+
+		if (!reg->valid)
+			LOG_TARGET_WARNING(target, "Storing invalid register %s", reg->name);
+
+		armv7m_algorithm_info->context[i] = buf_get_u32(reg->value, 0, 32);
 	}
 
 	for (int i = 0; i < num_mem_params; i++) {
@@ -517,7 +556,7 @@ int armv7m_start_algorithm(struct target *target,
 			continue;
 
 		struct reg *reg =
-			register_get_by_name(armv7m->arm.core_cache, reg_params[i].reg_name, 0);
+			register_get_by_name(armv7m->arm.core_cache, reg_params[i].reg_name, false);
 /*		uint32_t regvalue; */
 
 		if (!reg) {
@@ -546,7 +585,7 @@ int armv7m_start_algorithm(struct target *target,
 		 * Because xPSR.T is populated on reset from the vector table,
 		 * it might be 0 if the vector table has "bad" data in it.
 		 */
-		struct reg *reg = &armv7m->arm.core_cache->reg_list[ARMV7M_xPSR];
+		struct reg *reg = &armv7m->arm.core_cache->reg_list[ARMV7M_XPSR];
 		buf_set_u32(reg->value, 0, 32, 0x01000000);
 		reg->valid = true;
 		reg->dirty = true;
@@ -633,7 +672,7 @@ int armv7m_wait_algorithm(struct target *target,
 		if (reg_params[i].direction != PARAM_OUT) {
 			struct reg *reg = register_get_by_name(armv7m->arm.core_cache,
 					reg_params[i].reg_name,
-					0);
+					false);
 
 			if (!reg) {
 				LOG_ERROR("BUG: register '%s' not found", reg_params[i].reg_name);
@@ -652,16 +691,19 @@ int armv7m_wait_algorithm(struct target *target,
 	}
 
 	for (int i = armv7m->arm.core_cache->num_regs - 1; i >= 0; i--) {
+		struct reg *reg = &armv7m->arm.core_cache->reg_list[i];
+		if (!reg->exist)
+			continue;
+
 		uint32_t regvalue;
-		regvalue = buf_get_u32(armv7m->arm.core_cache->reg_list[i].value, 0, 32);
+		regvalue = buf_get_u32(reg->value, 0, 32);
 		if (regvalue != armv7m_algorithm_info->context[i]) {
 			LOG_DEBUG("restoring register %s with value 0x%8.8" PRIx32,
-					armv7m->arm.core_cache->reg_list[i].name,
-				armv7m_algorithm_info->context[i]);
-			buf_set_u32(armv7m->arm.core_cache->reg_list[i].value,
+					  reg->name, armv7m_algorithm_info->context[i]);
+			buf_set_u32(reg->value,
 				0, 32, armv7m_algorithm_info->context[i]);
-			armv7m->arm.core_cache->reg_list[i].valid = true;
-			armv7m->arm.core_cache->reg_list[i].dirty = true;
+			reg->valid = true;
+			reg->dirty = true;
 		}
 	}
 
@@ -693,8 +735,9 @@ int armv7m_arch_state(struct target *target)
 	ctrl = buf_get_u32(arm->core_cache->reg_list[ARMV7M_CONTROL].value, 0, 32);
 	sp = buf_get_u32(arm->core_cache->reg_list[ARMV7M_R13].value, 0, 32);
 
-	LOG_USER("target halted due to %s, current mode: %s %s\n"
+	LOG_USER("[%s] halted due to %s, current mode: %s %s\n"
 		"xPSR: %#8.8" PRIx32 " pc: %#8.8" PRIx32 " %csp: %#8.8" PRIx32 "%s%s",
+		target_name(target),
 		debug_reason_name(target),
 		arm_mode_name(arm->core_mode),
 		armv7m_exception_string(armv7m->exception_number),
@@ -743,7 +786,8 @@ struct reg_cache *armv7m_build_reg_cache(struct target *target)
 		reg_list[i].value = arch_info[i].value;
 		reg_list[i].dirty = false;
 		reg_list[i].valid = false;
-		reg_list[i].hidden = i == ARMV7M_PMSK_BPRI_FLTMSK_CTRL;
+		reg_list[i].hidden = (i == ARMV7M_PMSK_BPRI_FLTMSK_CTRL ||
+				i == ARMV8M_PMSK_BPRI_FLTMSK_CTRL_NS || i == ARMV8M_PMSK_BPRI_FLTMSK_CTRL_S);
 		reg_list[i].type = &armv7m_reg_type;
 		reg_list[i].arch_info = &arch_info[i];
 
@@ -769,7 +813,7 @@ struct reg_cache *armv7m_build_reg_cache(struct target *target)
 			LOG_ERROR("unable to allocate reg type list");
 	}
 
-	arm->cpsr = reg_list + ARMV7M_xPSR;
+	arm->cpsr = reg_list + ARMV7M_XPSR;
 	arm->pc = reg_list + ARMV7M_PC;
 	arm->core_cache = cache;
 
@@ -820,6 +864,7 @@ int armv7m_init_arch_info(struct target *target, struct armv7m_common *armv7m)
 	/* Enable stimulus port #0 by default */
 	armv7m->trace_config.itm_ter[0] = 1;
 
+	arm->core_state = ARM_STATE_THUMB;
 	arm->core_type = ARM_CORE_TYPE_M_PROFILE;
 	arm->arch_info = armv7m;
 	arm->setup_semihosting = armv7m_setup_semihosting;
@@ -924,7 +969,7 @@ int armv7m_blank_check_memory(struct target *target,
 		blocks_to_check = num_blocks;
 
 	struct algo_block *params = malloc((blocks_to_check+1)*sizeof(struct algo_block));
-	if (params == NULL) {
+	if (!params) {
 		retval = ERROR_FAIL;
 		goto cleanup1;
 	}
@@ -1050,7 +1095,11 @@ int armv7m_maybe_skip_bkpt_inst(struct target *target, bool *inst_found)
 
 const struct command_registration armv7m_command_handlers[] = {
 	{
-		.chain = arm_command_handlers,
+		.name = "arm",
+		.mode = COMMAND_ANY,
+		.help = "ARM command group",
+		.usage = "",
+		.chain = arm_all_profiles_command_handlers,
 	},
 	COMMAND_REGISTRATION_DONE
 };

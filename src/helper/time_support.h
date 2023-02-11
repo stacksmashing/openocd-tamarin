@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
+
 /***************************************************************************
  *   Copyright (C) 2006 by Dominic Rath                                    *
  *   Dominic.Rath@gmx.de                                                   *
@@ -7,25 +9,13 @@
  *                                                                         *
  *   Copyright (C) 2008 by Spencer Oliver                                  *
  *   spen@spen-soft.co.uk                                                  *
- *                                                                         *
- *   This program is free software; you can redistribute it and/or modify  *
- *   it under the terms of the GNU General Public License as published by  *
- *   the Free Software Foundation; either version 2 of the License, or     *
- *   (at your option) any later version.                                   *
- *                                                                         *
- *   This program is distributed in the hope that it will be useful,       *
- *   but WITHOUT ANY WARRANTY; without even the implied warranty of        *
- *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the         *
- *   GNU General Public License for more details.                          *
- *                                                                         *
- *   You should have received a copy of the GNU General Public License     *
- *   along with this program.  If not, see <http://www.gnu.org/licenses/>. *
  ***************************************************************************/
 
 #ifndef OPENOCD_HELPER_TIME_SUPPORT_H
 #define OPENOCD_HELPER_TIME_SUPPORT_H
 
 #include <time.h>
+#include "types.h"
 
 #ifdef HAVE_SYS_TIME_H
 #include <sys/time.h>
@@ -45,7 +35,7 @@ struct duration {
 
 /** Update the duration->start field to start the @a duration measurement. */
 int duration_start(struct duration *duration);
-/** Update the duration->elapsed field to finish the @a duration measurment. */
+/** Update the duration->elapsed field to finish the @a duration measurement. */
 int duration_measure(struct duration *duration);
 
 /** @returns Elapsed time in seconds. */

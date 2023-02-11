@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 noinst_LTLIBRARIES += %D%/libocdflashnor.la
 %C%_libocdflashnor_la_SOURCES = \
 	%D%/core.c \
@@ -44,6 +46,7 @@ NOR_DRIVERS = \
 	%D%/mrvlqspi.c \
 	%D%/niietcm4.c \
 	%D%/non_cfi.c \
+	%D%/npcx.c \
 	%D%/nrf5.c \
 	%D%/numicro.c \
 	%D%/ocl.c \
@@ -52,6 +55,8 @@ NOR_DRIVERS = \
 	%D%/psoc5lp.c \
 	%D%/psoc6.c \
 	%D%/renesas_rpchf.c \
+	%D%/rp2040.c \
+	%D%/rsl10.c \
 	%D%/sfdp.c \
 	%D%/sh_qspi.c \
 	%D%/sim3x.c \

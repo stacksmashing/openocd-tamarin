@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
+
 /***************************************************************************
  *   Copyright (C) 2009 by Alexei Babich                                   *
  *   Rezonans plc., Chelyabinsk, Russia                                    *
@@ -8,19 +10,6 @@
  *                                                                         *
  *   Copyright (C) 2011 by Erik Ahlen                                      *
  *   Avalon Innovation, Sweden                                             *
- *                                                                         *
- *   This program is free software; you can redistribute it and/or modify  *
- *   it under the terms of the GNU General Public License as published by  *
- *   the Free Software Foundation; either version 2 of the License, or     *
- *   (at your option) any later version.                                   *
- *                                                                         *
- *   This program is distributed in the hope that it will be useful,       *
- *   but WITHOUT ANY WARRANTY; without even the implied warranty of        *
- *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the         *
- *   GNU General Public License for more details.                          *
- *                                                                         *
- *   You should have received a copy of the GNU General Public License     *
- *   along with this program.  If not, see <http://www.gnu.org/licenses/>. *
  ***************************************************************************/
 
 /*
@@ -89,7 +78,7 @@ NAND_DEVICE_COMMAND_HANDLER(mxc_nand_device_command)
 	int hwecc_needed;
 
 	mxc_nf_info = malloc(sizeof(struct mxc_nf_controller));
-	if (mxc_nf_info == NULL) {
+	if (!mxc_nf_info) {
 		LOG_ERROR("no memory for nand controller");
 		return ERROR_FAIL;
 	}
@@ -207,9 +196,9 @@ static int mxc_init(struct nand_device *nand)
 	int validate_target_result;
 	uint16_t buffsize_register_content;
 	uint32_t sreg_content;
-	uint32_t SREG = MX2_FMCR;
-	uint32_t SEL_16BIT = MX2_FMCR_NF_16BIT_SEL;
-	uint32_t SEL_FMS = MX2_FMCR_NF_FMS;
+	uint32_t sreg = MX2_FMCR;
+	uint32_t sel_16bit = MX2_FMCR_NF_16BIT_SEL;
+	uint32_t sel_fms = MX2_FMCR_NF_FMS;
 	int retval;
 	uint16_t nand_status_content;
 	/*
@@ -226,27 +215,27 @@ static int mxc_init(struct nand_device *nand)
 		mxc_nf_info->flags.one_kb_sram = 0;
 
 	if (mxc_nf_info->mxc_version == MXC_VERSION_MX31) {
-		SREG = MX3_PCSR;
-		SEL_16BIT = MX3_PCSR_NF_16BIT_SEL;
-		SEL_FMS = MX3_PCSR_NF_FMS;
+		sreg = MX3_PCSR;
+		sel_16bit = MX3_PCSR_NF_16BIT_SEL;
+		sel_fms = MX3_PCSR_NF_FMS;
 	} else if (mxc_nf_info->mxc_version == MXC_VERSION_MX25) {
-		SREG = MX25_RCSR;
-		SEL_16BIT = MX25_RCSR_NF_16BIT_SEL;
-		SEL_FMS = MX25_RCSR_NF_FMS;
+		sreg = MX25_RCSR;
+		sel_16bit = MX25_RCSR_NF_16BIT_SEL;
+		sel_fms = MX25_RCSR_NF_FMS;
 	} else if (mxc_nf_info->mxc_version == MXC_VERSION_MX35) {
-		SREG = MX35_RCSR;
-		SEL_16BIT = MX35_RCSR_NF_16BIT_SEL;
-		SEL_FMS = MX35_RCSR_NF_FMS;
+		sreg = MX35_RCSR;
+		sel_16bit = MX35_RCSR_NF_16BIT_SEL;
+		sel_fms = MX35_RCSR_NF_FMS;
 	}
 
-	target_read_u32(target, SREG, &sreg_content);
+	target_read_u32(target, sreg, &sreg_content);
 	if (!nand->bus_width) {
 		/* bus_width not yet defined. Read it from MXC_FMCR */
-		nand->bus_width = (sreg_content & SEL_16BIT) ? 16 : 8;
+		nand->bus_width = (sreg_content & sel_16bit) ? 16 : 8;
 	} else {
 		/* bus_width forced in soft. Sync it to MXC_FMCR */
-		sreg_content |= ((nand->bus_width == 16) ? SEL_16BIT : 0x00000000);
-		target_write_u32(target, SREG, sreg_content);
+		sreg_content |= ((nand->bus_width == 16) ? sel_16bit : 0x00000000);
+		target_write_u32(target, sreg, sreg_content);
 	}
 	if (nand->bus_width == 16)
 		LOG_DEBUG("MXC_NF : bus is 16-bit width");
@@ -254,10 +243,10 @@ static int mxc_init(struct nand_device *nand)
 		LOG_DEBUG("MXC_NF : bus is 8-bit width");
 
 	if (!nand->page_size)
-		nand->page_size = (sreg_content & SEL_FMS) ? 2048 : 512;
+		nand->page_size = (sreg_content & sel_fms) ? 2048 : 512;
 	else {
-		sreg_content |= ((nand->page_size == 2048) ? SEL_FMS : 0x00000000);
-		target_write_u32(target, SREG, sreg_content);
+		sreg_content |= ((nand->page_size == 2048) ? sel_fms : 0x00000000);
+		target_write_u32(target, sreg, sreg_content);
 	}
 	if (mxc_nf_info->flags.one_kb_sram && (nand->page_size == 2048)) {
 		LOG_ERROR("NAND controller have only 1 kb SRAM, so "
@@ -649,18 +638,18 @@ static int mxc_read_page(struct nand_device *nand, uint32_t page,
 	}
 
 	if (nand->page_size > 512 && mxc_nf_info->flags.biswap_enabled) {
-		uint32_t SPARE_BUFFER3;
+		uint32_t spare_buffer3;
 		/* BI-swap -  work-around of mxc NFC for NAND device with page == 2k */
 		target_read_u16(target, MXC_NF_MAIN_BUFFER3 + 464, &swap1);
 		if (nfc_is_v1())
-			SPARE_BUFFER3 = MXC_NF_V1_SPARE_BUFFER3 + 4;
+			spare_buffer3 = MXC_NF_V1_SPARE_BUFFER3 + 4;
 		else
-			SPARE_BUFFER3 = MXC_NF_V2_SPARE_BUFFER3;
-		target_read_u16(target, SPARE_BUFFER3, &swap2);
+			spare_buffer3 = MXC_NF_V2_SPARE_BUFFER3;
+		target_read_u16(target, spare_buffer3, &swap2);
 		new_swap1 = (swap1 & 0xFF00) | (swap2 >> 8);
 		swap2 = (swap1 << 8) | (swap2 & 0xFF);
 		target_write_u16(target, MXC_NF_MAIN_BUFFER3 + 464, new_swap1);
-		target_write_u16(target, SPARE_BUFFER3, swap2);
+		target_write_u16(target, spare_buffer3, swap2);
 	}
 
 	if (data)

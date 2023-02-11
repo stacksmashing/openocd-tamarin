@@ -1,20 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
+
 /***************************************************************************
  *                                                                         *
  *   Copyright (C) 2018 by Bohdan Tymkiv                                   *
  *   bohdan.tymkiv@cypress.com bohdan200@gmail.com                         *
- *                                                                         *
- *   This program is free software; you can redistribute it and/or modify  *
- *   it under the terms of the GNU General Public License as published by  *
- *   the Free Software Foundation; either version 2 of the License, or     *
- *   (at your option) any later version.                                   *
- *                                                                         *
- *   This program is distributed in the hope that it will be useful,       *
- *   but WITHOUT ANY WARRANTY; without even the implied warranty of        *
- *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the         *
- *   GNU General Public License for more details.                          *
- *                                                                         *
- *   You should have received a copy of the GNU General Public License     *
- *   along with this program.  If not, see <http://www.gnu.org/licenses/>. *
  ***************************************************************************/
 
 #ifdef HAVE_CONFIG_H
@@ -24,11 +13,12 @@
 #include <time.h>
 
 #include "imp.h"
+#include "helper/time_support.h"
+#include "target/arm_adi_v5.h"
 #include "target/target.h"
 #include "target/cortex_m.h"
 #include "target/breakpoints.h"
 #include "target/target_type.h"
-#include "time_support.h"
 #include "target/algorithm.h"
 
 /**************************************************************************************************
@@ -181,10 +171,8 @@ destroy_rp_free_wa:
 	/* Something went wrong, do some cleanup */
 	destroy_reg_param(&reg_params);
 
-	if (g_stack_area) {
-		target_free_working_area(target, g_stack_area);
-		g_stack_area = NULL;
-	}
+	target_free_working_area(target, g_stack_area);
+	g_stack_area = NULL;
 
 	return hr;
 }
@@ -491,11 +479,10 @@ static const char *protection_to_str(uint8_t protection)
 /** ***********************************************************************************************
  * @brief psoc6_get_info Displays human-readable information about acquired device
  * @param bank current flash bank
- * @param buf pointer to buffer for human-readable text
- * @param buf_size size of the buffer
+ * @param cmd pointer to command invocation instance
  * @return ERROR_OK in case of success, ERROR_XXX code otherwise
  *************************************************************************************************/
-static int psoc6_get_info(struct flash_bank *bank, char *buf, int buf_size)
+static int psoc6_get_info(struct flash_bank *bank, struct command_invocation *cmd)
 {
 	struct psoc6_target_info *psoc6_info = bank->driver_priv;
 
@@ -506,7 +493,7 @@ static int psoc6_get_info(struct flash_bank *bank, char *buf, int buf_size)
 	if (hr != ERROR_OK)
 		return hr;
 
-	snprintf(buf, buf_size,
+	command_print_sameline(cmd,
 		"PSoC6 Silicon ID: 0x%08" PRIX32 "\n"
 		"Protection: %s\n"
 		"Main Flash size: %" PRIu32 " kB\n"
@@ -604,8 +591,7 @@ static int psoc6_probe(struct flash_bank *bank)
 
 	unsigned int num_sectors = bank_size / row_sz;
 	bank->size = bank_size;
-	bank->chip_width = 4;
-	bank->bus_width = 4;
+
 	bank->erased_value = 0;
 	bank->default_padded_value = 0;
 
@@ -744,9 +730,6 @@ static int psoc6_erase(struct flash_bank *bank, unsigned int first,
 			if (hr != ERROR_OK)
 				goto exit_free_wa;
 
-			for (unsigned int i = first; i < first + rows_in_sector; i++)
-				bank->sectors[i].is_erased = 1;
-
 			first += rows_in_sector;
 		} else {
 			/* Perform Row Erase otherwise */
@@ -754,7 +737,6 @@ static int psoc6_erase(struct flash_bank *bank, unsigned int first,
 			if (hr != ERROR_OK)
 				goto exit_free_wa;
 
-			bank->sectors[first].is_erased = 1;
 			first += 1;
 		}
 	}
@@ -1019,7 +1001,7 @@ static const struct command_registration psoc6_exec_command_handlers[] = {
 		.name = "reset_halt",
 		.handler = psoc6_handle_reset_halt,
 		.mode = COMMAND_EXEC,
-		.usage = NULL,
+		.usage = "",
 		.help = "Tries to simulate broken Vector Catch",
 	},
 	COMMAND_REGISTRATION_DONE

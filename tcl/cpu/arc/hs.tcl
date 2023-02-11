@@ -1,8 +1,8 @@
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 #  Copyright (C) 2015, 2020 Synopsys, Inc.
 #  Anton Kolesov <anton.kolesov@synopsys.com>
 #  Didin Evgeniy <didin@synopsys.com>
-#
-# SPDX-License-Identifier: GPL-2.0-or-later
 
 source [find cpu/arc/v2.tcl]
 
@@ -48,7 +48,7 @@ proc arc_hs_reset { {target ""} } {
 			$target arc jtag set-aux-reg 0x904 1
 			set l2_ctrl [$target arc jtag get-aux-reg 0x903]
 			set l2_ctrl [$target arc jtag get-aux-reg 0x903]
-			while { [expr $l2_ctrl & 0x100] != 0 } {
+			while { [expr {$l2_ctrl & 0x100}] != 0 } {
 				set l2_ctrl [$target arc jtag get-aux-reg 0x903]
 			}
 		}

@@ -1,23 +1,11 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
+
 /***************************************************************************
  *   Copyright (C) 2015 by Tobias Diedrich                                 *
  *   <ranma+openwrt@tdiedrich.de>                                          *
  *                                                                         *
  *   based on the stmsmi code written by Antonio Borneo                    *
  *   <borneo.antonio@gmail.com>                                            *
- *                                                                         *
- *   This program is free software; you can redistribute it and/or modify  *
- *   it under the terms of the GNU General Public License as published by  *
- *   the Free Software Foundation; either version 2 of the License, or     *
- *   (at your option) any later version.                                   *
- *                                                                         *
- *   This program is distributed in the hope that it will be useful,       *
- *   but WITHOUT ANY WARRANTY; without even the implied warranty of        *
- *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the         *
- *   GNU General Public License for more details.                          *
- *                                                                         *
- *   You should have received a copy of the GNU General Public License     *
- *   along with this program; if not, write to the                         *
- *   Free Software Foundation, Inc.                                        *
  *                                                                         *
  ***************************************************************************/
 /*
@@ -875,17 +863,16 @@ static int ath79_protect_check(struct flash_bank *bank)
 	return ERROR_OK;
 }
 
-static int get_ath79_info(struct flash_bank *bank, char *buf, int buf_size)
+static int get_ath79_info(struct flash_bank *bank, struct command_invocation *cmd)
 {
 	struct ath79_flash_bank *ath79_info = bank->driver_priv;
 
 	if (!ath79_info->probed) {
-		snprintf(buf, buf_size,
-			 "\nATH79 flash bank not probed yet\n");
+		command_print_sameline(cmd, "\nATH79 flash bank not probed yet\n");
 		return ERROR_OK;
 	}
 
-	snprintf(buf, buf_size, "\nATH79 flash information:\n"
+	command_print_sameline(cmd, "\nATH79 flash information:\n"
 		"  Device \'%s\' (ID 0x%08" PRIx32 ")\n",
 		ath79_info->dev->name, ath79_info->dev->device_id);
 

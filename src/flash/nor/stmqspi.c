@@ -1,22 +1,11 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
+
 /***************************************************************************
  *   Copyright (C) 2016 - 2019 by Andreas Bolsch                           *
  *   andreas.bolsch@mni.thm.de                                             *
  *                                                                         *
  *   Copyright (C) 2010 by Antonio Borneo                                  *
  *   borneo.antonio@gmail.com                                              *
- *                                                                         *
- *   This program is free software; you can redistribute it and/or modify  *
- *   it under the terms of the GNU General Public License as published by  *
- *   the Free Software Foundation; either version 2 of the License, or	   *
- *   (at your option) any later version.                                   *
- *                                                                         *
- *   This program is distributed in the hope that it will be useful,       *
- *   but WITHOUT ANY WARRANTY; without even the implied warranty of        *
- *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the         *
- *   GNU General Public License for more details.                          *
- *                                                                         *
- *   You should have received a copy of the GNU General Public License     *
- *   along with this program.  If not, see <http://www.gnu.org/licenses/>. *
  ***************************************************************************/
 
 /* STM QuadSPI (QSPI) and OctoSPI (OCTOSPI) controller are SPI bus controllers
@@ -40,6 +29,7 @@
 #endif
 
 #include "imp.h"
+#include <helper/binarybuffer.h>
 #include <helper/bits.h>
 #include <helper/time_support.h>
 #include <target/algorithm.h>
@@ -51,14 +41,6 @@
 /* deprecated */
 #undef SPIFLASH_READ
 #undef SPIFLASH_PAGE_PROGRAM
-
-#define READ_REG(a)												\
-({																\
-	uint32_t _result;											\
-																\
-	retval = target_read_u32(target, io_base + (a), &_result);	\
-	(retval == ERROR_OK) ? _result : 0x0;						\
-})
 
 /* saved mode settings */
 #define QSPI_MODE (stmqspi_info->saved_ccr & \
@@ -156,23 +138,6 @@
 
 #define OPI_CMD(cmd) ((OPI_MODE ? ((((uint16_t)(cmd)) << 8) | (~(cmd) & 0xFFU)) : (cmd)))
 
-#define OCTOSPI_CMD(mode, ccr, ir)										\
-({																		\
-	retval = target_write_u32(target, io_base + OCTOSPI_CR,				\
-		OCTOSPI_MODE | (mode));											\
-	if (retval == ERROR_OK)												\
-		retval = target_write_u32(target, io_base + OCTOSPI_TCR,		\
-			(stmqspi_info->saved_tcr & ~OCTOSPI_DCYC_MASK) |			\
-			((OPI_MODE && ((mode) == OCTOSPI_READ_MODE)) ?				\
-			(OPI_DUMMY << OCTOSPI_DCYC_POS) : 0));						\
-	if (retval == ERROR_OK)												\
-		retval = target_write_u32(target, io_base + OCTOSPI_CCR, ccr);	\
-	if (retval == ERROR_OK)												\
-		retval = target_write_u32(target, io_base + OCTOSPI_IR,			\
-			OPI_CMD(ir));												\
-	retval;																\
-})
-
 /* convert uint32_t into 4 uint8_t in little endian byte order */
 static inline uint32_t h_to_le_32(uint32_t val)
 {
@@ -200,13 +165,42 @@ struct stmqspi_flash_bank {
 	bool octo;
 	struct flash_device dev;
 	uint32_t io_base;
-	uint32_t saved_cr;	/* in particalar FSEL, DFM bit mask in QUADSPI_CR *AND* OCTOSPI_CR */
+	uint32_t saved_cr;	/* in particular FSEL, DFM bit mask in QUADSPI_CR *AND* OCTOSPI_CR */
 	uint32_t saved_ccr; /* different meaning for QUADSPI and OCTOSPI */
 	uint32_t saved_tcr;	/* only for OCTOSPI */
 	uint32_t saved_ir;	/* only for OCTOSPI */
 	unsigned int sfdp_dummy1;	/* number of dummy bytes for SFDP read for flash1 and octo */
 	unsigned int sfdp_dummy2;	/* number of dummy bytes for SFDP read for flash2 */
 };
+
+static inline int octospi_cmd(struct flash_bank *bank, uint32_t mode,
+		uint32_t ccr, uint32_t ir)
+{
+	struct target *target = bank->target;
+	const struct stmqspi_flash_bank *stmqspi_info = bank->driver_priv;
+	const uint32_t io_base = stmqspi_info->io_base;
+
+	int retval = target_write_u32(target, io_base + OCTOSPI_CR,
+		OCTOSPI_MODE | mode);
+
+	if (retval != ERROR_OK)
+		return retval;
+
+	retval = target_write_u32(target, io_base + OCTOSPI_TCR,
+		(stmqspi_info->saved_tcr & ~OCTOSPI_DCYC_MASK) |
+		((OPI_MODE && (mode == OCTOSPI_READ_MODE)) ?
+		(OPI_DUMMY << OCTOSPI_DCYC_POS) : 0));
+
+	if (retval != ERROR_OK)
+		return retval;
+
+	retval = target_write_u32(target, io_base + OCTOSPI_CCR, ccr);
+
+	if (retval != ERROR_OK)
+		return retval;
+
+	return target_write_u32(target, io_base + OCTOSPI_IR, OPI_CMD(ir));
+}
 
 FLASH_BANK_COMMAND_HANDLER(stmqspi_flash_bank_command)
 {
@@ -221,7 +215,7 @@ FLASH_BANK_COMMAND_HANDLER(stmqspi_flash_bank_command)
 	COMMAND_PARSE_NUMBER(u32, CMD_ARGV[6], io_base);
 
 	stmqspi_info = malloc(sizeof(struct stmqspi_flash_bank));
-	if (stmqspi_info == NULL) {
+	if (!stmqspi_info) {
 		LOG_ERROR("not enough memory");
 		return ERROR_FAIL;
 	}
@@ -242,19 +236,19 @@ static int poll_busy(struct flash_bank *bank, int timeout)
 	struct target *target = bank->target;
 	struct stmqspi_flash_bank *stmqspi_info = bank->driver_priv;
 	uint32_t io_base = stmqspi_info->io_base;
-	uint32_t spi_sr;
-	int retval;
 	long long endtime;
 
 	endtime = timeval_ms() + timeout;
 	do {
-		spi_sr = READ_REG(SPI_SR);
-		if ((spi_sr & BIT(SPI_BUSY)) == 0) {
-			if (retval == ERROR_OK) {
-				/* Clear transmit finished flag */
-				retval = target_write_u32(target, io_base + SPI_FCR, BIT(SPI_TCF));
-			}
+		uint32_t spi_sr;
+		int retval = target_read_u32(target, io_base + SPI_SR, &spi_sr);
+
+		if (retval != ERROR_OK)
 			return retval;
+
+		if ((spi_sr & BIT(SPI_BUSY)) == 0) {
+			/* Clear transmit finished flag */
+			return target_write_u32(target, io_base + SPI_FCR, BIT(SPI_TCF));
 		} else
 			LOG_DEBUG("busy: 0x%08X", spi_sr);
 		alive_sleep(1);
@@ -262,6 +256,21 @@ static int poll_busy(struct flash_bank *bank, int timeout)
 
 	LOG_ERROR("Timeout while polling BUSY");
 	return ERROR_FLASH_OPERATION_FAILED;
+}
+
+static int stmqspi_abort(struct flash_bank *bank)
+{
+	struct target *target = bank->target;
+	const struct stmqspi_flash_bank *stmqspi_info = bank->driver_priv;
+	const uint32_t io_base = stmqspi_info->io_base;
+	uint32_t cr;
+
+	int retval = target_read_u32(target, io_base + SPI_CR, &cr);
+
+	if (retval != ERROR_OK)
+		cr = 0;
+
+	return target_write_u32(target, io_base + SPI_CR, cr | BIT(SPI_ABORT));
 }
 
 /* Set to memory-mapped mode, e.g. after an error */
@@ -278,8 +287,7 @@ static int set_mm_mode(struct flash_bank *bank)
 		return retval;
 
 	/* Abort any previous operation */
-	retval = target_write_u32(target, io_base + SPI_CR,
-		READ_REG(SPI_CR) | BIT(SPI_ABORT));
+	retval = stmqspi_abort(bank);
 	if (retval != ERROR_OK)
 		return retval;
 
@@ -321,8 +329,7 @@ static int read_status_reg(struct flash_bank *bank, uint16_t *status)
 	int count, retval;
 
 	/* Abort any previous operation */
-	retval = target_write_u32(target, io_base + SPI_CR,
-		READ_REG(SPI_CR) | BIT(SPI_ABORT));
+	retval = stmqspi_abort(bank);
 	if (retval != ERROR_OK)
 		return retval;
 
@@ -340,7 +347,8 @@ static int read_status_reg(struct flash_bank *bank, uint16_t *status)
 
 	/* Read status */
 	if (IS_OCTOSPI) {
-		retval = OCTOSPI_CMD(OCTOSPI_READ_MODE, OCTOSPI_CCR_READ_STATUS, SPIFLASH_READ_STATUS);
+		retval = octospi_cmd(bank, OCTOSPI_READ_MODE, OCTOSPI_CCR_READ_STATUS,
+			SPIFLASH_READ_STATUS);
 		if (OPI_MODE) {
 			/* Dummy address 0, only required for 8-line mode */
 			retval = target_write_u32(target, io_base + SPI_AR, 0);
@@ -355,7 +363,8 @@ static int read_status_reg(struct flash_bank *bank, uint16_t *status)
 	*status = 0;
 
 	/* for debugging only */
-	(void)READ_REG(SPI_SR);
+	uint32_t dummy;
+	(void)target_read_u32(target, io_base + SPI_SR, &dummy);
 
 	for ( ; count > 0; --count) {
 		if ((stmqspi_info->saved_cr & (BIT(SPI_DUAL_FLASH) | BIT(SPI_FSEL_FLASH)))
@@ -416,8 +425,7 @@ static int qspi_write_enable(struct flash_bank *bank)
 	int retval;
 
 	/* Abort any previous operation */
-	retval = target_write_u32(target, io_base + SPI_CR,
-		READ_REG(SPI_CR) | BIT(SPI_ABORT));
+	retval = stmqspi_abort(bank);
 	if (retval != ERROR_OK)
 		return retval;
 
@@ -428,7 +436,8 @@ static int qspi_write_enable(struct flash_bank *bank)
 
 	/* Send write enable command */
 	if (IS_OCTOSPI) {
-		retval = OCTOSPI_CMD(OCTOSPI_WRITE_MODE, OCTOSPI_CCR_WRITE_ENABLE, SPIFLASH_WRITE_ENABLE);
+		retval = octospi_cmd(bank, OCTOSPI_WRITE_MODE, OCTOSPI_CCR_WRITE_ENABLE,
+			SPIFLASH_WRITE_ENABLE);
 		if (OPI_MODE) {
 			/* Dummy address 0, only required for 8-line mode */
 			retval = target_write_u32(target, io_base + SPI_AR, 0);
@@ -490,7 +499,7 @@ COMMAND_HANDLER(stmqspi_handle_mass_erase_command)
 		return ERROR_COMMAND_SYNTAX_ERROR;
 
 	retval = CALL_COMMAND_HANDLER(flash_command_get_bank, 0, &bank);
-	if (ERROR_OK != retval)
+	if (retval != ERROR_OK)
 		return retval;
 
 	stmqspi_info = bank->driver_priv;
@@ -527,7 +536,7 @@ COMMAND_HANDLER(stmqspi_handle_mass_erase_command)
 
 	/* Send Mass Erase command */
 	if (IS_OCTOSPI)
-		retval = OCTOSPI_CMD(OCTOSPI_WRITE_MODE, OCTOSPI_CCR_MASS_ERASE,
+		retval = octospi_cmd(bank, OCTOSPI_WRITE_MODE, OCTOSPI_CCR_MASS_ERASE,
 			stmqspi_info->dev.chip_erase_cmd);
 	else
 		retval = target_write_u32(target, io_base + QSPI_CCR, QSPI_CCR_MASS_ERASE);
@@ -569,18 +578,13 @@ COMMAND_HANDLER(stmqspi_handle_mass_erase_command)
 	retval = wait_till_ready(bank, SPI_MASS_ERASE_TIMEOUT);
 
 	duration_measure(&bench);
-	if (retval == ERROR_OK) {
-		/* set all sectors as erased */
-		for (sector = 0; sector < bank->num_sectors; sector++)
-			bank->sectors[sector].is_erased = 1;
-
+	if (retval == ERROR_OK)
 		command_print(CMD, "stmqspi mass erase completed in %fs (%0.3f KiB/s)",
 			duration_elapsed(&bench),
 			duration_kbps(&bench, bank->size));
-	} else {
+	else
 		command_print(CMD, "stmqspi mass erase not completed even after %fs",
 			duration_elapsed(&bench));
-	}
 
 err:
 	/* Switch to memory mapped mode before return to prompt */
@@ -612,20 +616,19 @@ COMMAND_HANDLER(stmqspi_handle_set)
 
 	LOG_DEBUG("%s", __func__);
 
-	dual = (stmqspi_info->saved_cr & BIT(SPI_DUAL_FLASH)) ? 1 : 0;
-
 	/* chip_erase_cmd, sectorsize and erase_cmd are optional */
 	if ((CMD_ARGC < 7) || (CMD_ARGC > 10))
 		return ERROR_COMMAND_SYNTAX_ERROR;
 
 	retval = CALL_COMMAND_HANDLER(flash_command_get_bank, index++, &bank);
-	if (ERROR_OK != retval)
+	if (retval != ERROR_OK)
 		return retval;
 
 	target = bank->target;
 	stmqspi_info = bank->driver_priv;
+	dual = (stmqspi_info->saved_cr & BIT(SPI_DUAL_FLASH)) ? 1 : 0;
 
-	/* invalidate all old info */
+	/* invalidate all flash device info */
 	if (stmqspi_info->probed)
 		free(bank->sectors);
 	bank->size = 0;
@@ -714,9 +717,12 @@ COMMAND_HANDLER(stmqspi_handle_set)
 	bank->size = stmqspi_info->dev.size_in_bytes << dual;
 
 	io_base = stmqspi_info->io_base;
-	fsize = (READ_REG(SPI_DCR) >> SPI_FSIZE_POS) & (BIT(SPI_FSIZE_LEN) - 1);
+
+	uint32_t dcr;
+	retval = target_read_u32(target, io_base + SPI_DCR, &dcr);
 	if (retval != ERROR_OK)
 		return retval;
+	fsize = (dcr >> SPI_FSIZE_POS) & (BIT(SPI_FSIZE_LEN) - 1);
 
 	LOG_DEBUG("FSIZE = 0x%04x", fsize);
 	if (bank->size == BIT(fsize + 1))
@@ -730,7 +736,7 @@ COMMAND_HANDLER(stmqspi_handle_set)
 	bank->num_sectors =
 		stmqspi_info->dev.size_in_bytes / stmqspi_info->dev.sectorsize;
 	sectors = malloc(sizeof(struct flash_sector) * bank->num_sectors);
-	if (sectors == NULL) {
+	if (!sectors) {
 		LOG_ERROR("not enough memory");
 		return ERROR_FAIL;
 	}
@@ -745,13 +751,13 @@ COMMAND_HANDLER(stmqspi_handle_set)
 	bank->sectors = sectors;
 	stmqspi_info->dev.name = stmqspi_info->devname;
 	if (stmqspi_info->dev.size_in_bytes / 4096)
-		LOG_INFO("flash \'%s\' id = unknown\nchip size = %" PRIu32 "kbytes,"
-			" bank size = %" PRIu32 "kbytes", stmqspi_info->dev.name,
+		LOG_INFO("flash \'%s\' id = unknown\nchip size = %" PRIu32 " KiB,"
+			" bank size = %" PRIu32 " KiB", stmqspi_info->dev.name,
 			stmqspi_info->dev.size_in_bytes / 1024,
 			(stmqspi_info->dev.size_in_bytes / 1024) << dual);
 	else
-		LOG_INFO("flash \'%s\' id = unknown\nchip size = %" PRIu32 "bytes,"
-			" bank size = %" PRIu32 "bytes", stmqspi_info->dev.name,
+		LOG_INFO("flash \'%s\' id = unknown\nchip size = %" PRIu32 " B,"
+			" bank size = %" PRIu32 " B", stmqspi_info->dev.name,
 			stmqspi_info->dev.size_in_bytes,
 			stmqspi_info->dev.size_in_bytes << dual);
 
@@ -784,7 +790,7 @@ COMMAND_HANDLER(stmqspi_handle_cmd)
 	}
 
 	retval = CALL_COMMAND_HANDLER(flash_command_get_bank, 0, &bank);
-	if (ERROR_OK != retval)
+	if (retval != ERROR_OK)
 		return retval;
 
 	target = bank->target;
@@ -823,8 +829,7 @@ COMMAND_HANDLER(stmqspi_handle_cmd)
 	}
 
 	/* Abort any previous operation */
-	retval = target_write_u32(target, io_base + SPI_CR,
-		READ_REG(SPI_CR) | BIT(SPI_ABORT));
+	retval = stmqspi_abort(bank);
 	if (retval != ERROR_OK)
 		return retval;
 
@@ -842,7 +847,7 @@ COMMAND_HANDLER(stmqspi_handle_cmd)
 			goto err;
 
 		if (IS_OCTOSPI)
-			retval = OCTOSPI_CMD(OCTOSPI_WRITE_MODE,
+			retval = octospi_cmd(bank, OCTOSPI_WRITE_MODE,
 				(OCTOSPI_MODE_CCR & OCTOSPI_NO_ALTB & OCTOSPI_NO_ADDR &
 				((num_write == 1) ? OCTOSPI_NO_DATA : ~0U)), cmd_byte);
 		else
@@ -879,7 +884,7 @@ COMMAND_HANDLER(stmqspi_handle_cmd)
 		if (retval != ERROR_OK)
 			goto err;
 		if (IS_OCTOSPI)
-			retval = OCTOSPI_CMD(OCTOSPI_READ_MODE,
+			retval = octospi_cmd(bank, OCTOSPI_READ_MODE,
 				(OCTOSPI_MODE_CCR & OCTOSPI_NO_DDTR & OCTOSPI_NO_ALTB & ~OCTOSPI_ADDR4 &
 					((num_write == 1) ? OCTOSPI_NO_ADDR : ~0U)) |
 				(((num_write - 2) & 0x3U) << SPI_ADSIZE_POS), cmd_byte);
@@ -930,7 +935,7 @@ static int qspi_erase_sector(struct flash_bank *bank, unsigned int sector)
 
 	/* Send Sector Erase command */
 	if (IS_OCTOSPI)
-		retval = OCTOSPI_CMD(OCTOSPI_WRITE_MODE, OCTOSPI_CCR_SECTOR_ERASE,
+		retval = octospi_cmd(bank, OCTOSPI_WRITE_MODE, OCTOSPI_CCR_SECTOR_ERASE,
 			stmqspi_info->dev.erase_cmd);
 	else
 		retval = target_write_u32(target, io_base + QSPI_CCR, QSPI_CCR_SECTOR_ERASE);
@@ -1059,7 +1064,6 @@ static int stmqspi_blank_check(struct flash_bank *bank)
 {
 	struct target *target = bank->target;
 	struct stmqspi_flash_bank *stmqspi_info = bank->driver_priv;
-	uint32_t io_base = stmqspi_info->io_base;
 	struct duration bench;
 	struct reg_param reg_params[2];
 	struct armv7m_algorithm armv7m_info;
@@ -1082,8 +1086,7 @@ static int stmqspi_blank_check(struct flash_bank *bank)
 	}
 
 	/* Abort any previous operation */
-	retval = target_write_u32(target, io_base + SPI_CR,
-		READ_REG(SPI_CR) | BIT(SPI_ABORT));
+	retval = stmqspi_abort(bank);
 	if (retval != ERROR_OK)
 		return retval;
 
@@ -1568,7 +1571,6 @@ static int stmqspi_read(struct flash_bank *bank, uint8_t *buffer,
 {
 	struct target *target = bank->target;
 	struct stmqspi_flash_bank *stmqspi_info = bank->driver_priv;
-	uint32_t io_base = stmqspi_info->io_base;
 	int retval;
 
 	LOG_DEBUG("%s: offset=0x%08" PRIx32 " count=0x%08" PRIx32,
@@ -1590,8 +1592,7 @@ static int stmqspi_read(struct flash_bank *bank, uint8_t *buffer,
 	}
 
 	/* Abort any previous operation */
-	retval = target_write_u32(target, io_base + SPI_CR,
-		READ_REG(SPI_CR) | BIT(SPI_ABORT));
+	retval = stmqspi_abort(bank);
 	if (retval != ERROR_OK)
 		return retval;
 
@@ -1608,7 +1609,6 @@ static int stmqspi_write(struct flash_bank *bank, const uint8_t *buffer,
 {
 	struct target *target = bank->target;
 	struct stmqspi_flash_bank *stmqspi_info = bank->driver_priv;
-	uint32_t io_base = stmqspi_info->io_base;
 	unsigned int dual, sector;
 	bool octal_dtr;
 	int retval;
@@ -1653,8 +1653,7 @@ static int stmqspi_write(struct flash_bank *bank, const uint8_t *buffer,
 	}
 
 	/* Abort any previous operation */
-	retval = target_write_u32(target, io_base + SPI_CR,
-		READ_REG(SPI_CR) | BIT(SPI_ABORT));
+	retval = stmqspi_abort(bank);
 	if (retval != ERROR_OK)
 		return retval;
 
@@ -1671,7 +1670,6 @@ static int stmqspi_verify(struct flash_bank *bank, const uint8_t *buffer,
 {
 	struct target *target = bank->target;
 	struct stmqspi_flash_bank *stmqspi_info = bank->driver_priv;
-	uint32_t io_base = stmqspi_info->io_base;
 	unsigned int dual;
 	bool octal_dtr;
 	int retval;
@@ -1704,8 +1702,7 @@ static int stmqspi_verify(struct flash_bank *bank, const uint8_t *buffer,
 	}
 
 	/* Abort any previous operation */
-	retval = target_write_u32(target, io_base + SPI_CR,
-		READ_REG(SPI_CR) | BIT(SPI_ABORT));
+	retval = stmqspi_abort(bank);
 	if (retval != ERROR_OK)
 		return retval;
 
@@ -1757,8 +1754,8 @@ static int find_sfdp_dummy(struct flash_bank *bank, int len)
 
 	/* Read SFDP block */
 	if (IS_OCTOSPI)
-		retval = OCTOSPI_CMD(OCTOSPI_READ_MODE, OCTOSPI_CCR_READ_SFDP(len),
-			SPIFLASH_READ_SFDP);
+		retval = octospi_cmd(bank, OCTOSPI_READ_MODE,
+			OCTOSPI_CCR_READ_SFDP(len), SPIFLASH_READ_SFDP);
 	else
 		retval = target_write_u32(target, io_base + QSPI_CCR, QSPI_CCR_READ_SFDP);
 	if (retval != ERROR_OK)
@@ -1799,13 +1796,11 @@ static int find_sfdp_dummy(struct flash_bank *bank, int len)
 		}
 	}
 
-	retval = ERROR_FAIL;
 	LOG_DEBUG("no start of SFDP header even after %u dummy bytes", count);
 
 err:
 	/* Abort operation */
-	retval = target_write_u32(target, io_base + SPI_CR,
-		READ_REG(SPI_CR) | BIT(SPI_ABORT));
+	retval = stmqspi_abort(bank);
 
 	return retval;
 }
@@ -1880,8 +1875,8 @@ static int read_sfdp_block(struct flash_bank *bank, uint32_t addr,
 
 	/* Read SFDP block */
 	if (IS_OCTOSPI)
-		retval = OCTOSPI_CMD(OCTOSPI_READ_MODE, OCTOSPI_CCR_READ_SFDP(len),
-			SPIFLASH_READ_SFDP);
+		retval = octospi_cmd(bank, OCTOSPI_READ_MODE,
+			OCTOSPI_CCR_READ_SFDP(len), SPIFLASH_READ_SFDP);
 	else
 		retval = target_write_u32(target, io_base + QSPI_CCR, QSPI_CCR_READ_SFDP);
 	if (retval != ERROR_OK)
@@ -1959,8 +1954,7 @@ static int read_flash_id(struct flash_bank *bank, uint32_t *id1, uint32_t *id2)
 	/* SPIFLASH_READ_MID causes device in octal mode to go berserk, so don't use in this case */
 	for (type = (IS_OCTOSPI && OPI_MODE) ? 1 : 0; type < 2 ; type++) {
 		/* Abort any previous operation */
-		retval = target_write_u32(target, io_base + SPI_CR,
-			READ_REG(SPI_CR) | BIT(SPI_ABORT));
+		retval = stmqspi_abort(bank);
 		if (retval != ERROR_OK)
 			goto err;
 
@@ -1986,14 +1980,16 @@ static int read_flash_id(struct flash_bank *bank, uint32_t *id1, uint32_t *id2)
 		switch (type) {
 			case 0:
 				if (IS_OCTOSPI)
-					retval = OCTOSPI_CMD(OCTOSPI_READ_MODE, OCTOSPI_CCR_READ_MID, SPIFLASH_READ_MID);
+					retval = octospi_cmd(bank, OCTOSPI_READ_MODE,
+						OCTOSPI_CCR_READ_MID, SPIFLASH_READ_MID);
 				else
 					retval = target_write_u32(target, io_base + QSPI_CCR, QSPI_CCR_READ_MID);
 				break;
 
 			case 1:
 				if (IS_OCTOSPI)
-					retval = OCTOSPI_CMD(OCTOSPI_READ_MODE, OCTOSPI_CCR_READ_ID, SPIFLASH_READ_ID);
+					retval = octospi_cmd(bank, OCTOSPI_READ_MODE,
+						OCTOSPI_CCR_READ_ID, SPIFLASH_READ_ID);
 				else
 					retval = target_write_u32(target, io_base + QSPI_CCR, QSPI_CCR_READ_ID);
 				break;
@@ -2013,7 +2009,8 @@ static int read_flash_id(struct flash_bank *bank, uint32_t *id1, uint32_t *id2)
 		}
 
 		/* for debugging only */
-		(void)READ_REG(SPI_SR);
+		uint32_t dummy;
+		(void)target_read_u32(target, io_base + SPI_SR, &dummy);
 
 		/* Read ID from Data Register */
 		for (len1 = 0, len2 = 0; count > 0; --count) {
@@ -2080,20 +2077,20 @@ static int stmqspi_probe(struct flash_bank *bank)
 	bool octal_dtr;
 	int retval;
 
-	if (stmqspi_info->probed) {
-		bank->size = 0;
-		bank->num_sectors = 0;
+	/* invalidate all flash device info */
+	if (stmqspi_info->probed)
 		free(bank->sectors);
-		bank->sectors = NULL;
-		memset(&stmqspi_info->dev, 0, sizeof(stmqspi_info->dev));
-		stmqspi_info->sfdp_dummy1 = 0;
-		stmqspi_info->sfdp_dummy2 = 0;
-		stmqspi_info->probed = false;
-	}
+	bank->size = 0;
+	bank->num_sectors = 0;
+	bank->sectors = NULL;
+	stmqspi_info->sfdp_dummy1 = 0;
+	stmqspi_info->sfdp_dummy2 = 0;
+	stmqspi_info->probed = false;
+	memset(&stmqspi_info->dev, 0, sizeof(stmqspi_info->dev));
+	stmqspi_info->dev.name = "unknown";
 
 	/* Abort any previous operation */
-	retval = target_write_u32(target, io_base + SPI_CR,
-		READ_REG(SPI_CR) | BIT(SPI_ABORT));
+	retval = stmqspi_abort(bank);
 	if (retval != ERROR_OK)
 		return retval;
 
@@ -2105,50 +2102,66 @@ static int stmqspi_probe(struct flash_bank *bank)
 	/* check whether QSPI_ABR is writeable and readback returns the value written */
 	retval = target_write_u32(target, io_base + QSPI_ABR, magic);
 	if (retval == ERROR_OK) {
-		retval = target_read_u32(target, io_base + QSPI_ABR, &data);
-		retval = target_write_u32(target, io_base + QSPI_ABR, 0);
+		(void)target_read_u32(target, io_base + QSPI_ABR, &data);
+		(void)target_write_u32(target, io_base + QSPI_ABR, 0);
 	}
 
 	if (data == magic) {
 		LOG_DEBUG("QSPI_ABR register present");
 		stmqspi_info->octo = false;
-	} else if (READ_REG(OCTOSPI_MAGIC) == OCTO_MAGIC_ID) {
-		LOG_DEBUG("OCTOSPI_MAGIC present");
-		stmqspi_info->octo = true;
 	} else {
-		LOG_ERROR("No QSPI, no OCTOSPI at 0x%08" PRIx32, io_base);
-		stmqspi_info->probed = false;
-		stmqspi_info->dev.name = "none";
-		return ERROR_FAIL;
+		uint32_t magic_id;
+
+		retval = target_read_u32(target, io_base + OCTOSPI_MAGIC, &magic_id);
+
+		if (retval == ERROR_OK && magic_id == OCTO_MAGIC_ID) {
+			LOG_DEBUG("OCTOSPI_MAGIC present");
+			stmqspi_info->octo = true;
+		} else {
+			LOG_ERROR("No QSPI, no OCTOSPI at 0x%08" PRIx32, io_base);
+			stmqspi_info->probed = false;
+			stmqspi_info->dev.name = "none";
+			return ERROR_FAIL;
+		}
 	}
 
 	/* save current FSEL and DFM bits in QSPI/OCTOSPI_CR, current QSPI/OCTOSPI_CCR value */
-	stmqspi_info->saved_cr = READ_REG(SPI_CR);
+	retval = target_read_u32(target, io_base + SPI_CR, &stmqspi_info->saved_cr);
 	if (retval == ERROR_OK)
-		stmqspi_info->saved_ccr = READ_REG(SPI_CCR);
+		retval = target_read_u32(target, io_base + SPI_CCR, &stmqspi_info->saved_ccr);
 
 	if (IS_OCTOSPI) {
-		uint32_t mtyp;
+		uint32_t dcr1;
 
-		mtyp = ((READ_REG(OCTOSPI_DCR1) & OCTOSPI_MTYP_MASK)) >> OCTOSPI_MTYP_POS;
+		retval = target_read_u32(target, io_base + OCTOSPI_DCR1, &dcr1);
+
 		if (retval == ERROR_OK)
-			stmqspi_info->saved_tcr = READ_REG(OCTOSPI_TCR);
+			retval = target_read_u32(target, io_base + OCTOSPI_TCR,
+				&stmqspi_info->saved_tcr);
+
 		if (retval == ERROR_OK)
-			stmqspi_info->saved_ir = READ_REG(OCTOSPI_IR);
-		if ((mtyp != 0x0) && (mtyp != 0x1)) {
-			retval = ERROR_FAIL;
-			LOG_ERROR("Only regular SPI protocol supported in OCTOSPI");
-		}
-		if (retval == ERROR_OK) {
-			LOG_DEBUG("OCTOSPI at 0x%08" PRIx64 ", io_base at 0x%08" PRIx32 ", OCTOSPI_CR 0x%08"
-				PRIx32 ", OCTOSPI_CCR 0x%08" PRIx32 ", %d-byte addr", bank->base, io_base,
-				stmqspi_info->saved_cr, stmqspi_info->saved_ccr, SPI_ADSIZE);
-		} else {
+			retval = target_read_u32(target, io_base + OCTOSPI_IR,
+				&stmqspi_info->saved_ir);
+
+		if (retval != ERROR_OK) {
 			LOG_ERROR("No OCTOSPI at io_base 0x%08" PRIx32, io_base);
 			stmqspi_info->probed = false;
 			stmqspi_info->dev.name = "none";
 			return ERROR_FAIL;
 		}
+
+		const uint32_t mtyp = (dcr1 & OCTOSPI_MTYP_MASK) >> OCTOSPI_MTYP_POS;
+
+		if ((mtyp != 0x0) && (mtyp != 0x1)) {
+			LOG_ERROR("Only regular SPI protocol supported in OCTOSPI");
+			stmqspi_info->probed = false;
+			stmqspi_info->dev.name = "none";
+			return ERROR_FAIL;
+		}
+
+		LOG_DEBUG("OCTOSPI at 0x%08" PRIx64 ", io_base at 0x%08" PRIx32 ", OCTOSPI_CR 0x%08"
+			PRIx32 ", OCTOSPI_CCR 0x%08" PRIx32 ", %d-byte addr", bank->base, io_base,
+			stmqspi_info->saved_cr, stmqspi_info->saved_ccr, SPI_ADSIZE);
 	} else {
 		if (retval == ERROR_OK) {
 			LOG_DEBUG("QSPI at 0x%08" PRIx64 ", io_base at 0x%08" PRIx32 ", QSPI_CR 0x%08"
@@ -2190,10 +2203,10 @@ static int stmqspi_probe(struct flash_bank *bank)
 			memcpy(&stmqspi_info->dev, p, sizeof(stmqspi_info->dev));
 			if (p->size_in_bytes / 4096)
 				LOG_INFO("flash1 \'%s\' id = 0x%06" PRIx32 " size = %" PRIu32
-					"kbytes", p->name, id1, p->size_in_bytes / 1024);
+					" KiB", p->name, id1, p->size_in_bytes / 1024);
 			else
 				LOG_INFO("flash1 \'%s\' id = 0x%06" PRIx32 " size = %" PRIu32
-					"bytes", p->name, id1, p->size_in_bytes);
+					" B", p->name, id1, p->size_in_bytes);
 			break;
 		}
 	}
@@ -2212,7 +2225,7 @@ static int stmqspi_probe(struct flash_bank *bank)
 
 		if (retval == ERROR_OK) {
 			LOG_INFO("flash1 \'%s\' id = 0x%06" PRIx32 " size = %" PRIu32
-				"kbytes", temp.name, id1, temp.size_in_bytes / 1024);
+				" KiB", temp.name, id1, temp.size_in_bytes / 1024);
 			/* save info and retrieved *good* id as spi_sfdp clears all info */
 			memcpy(&stmqspi_info->dev, &temp, sizeof(stmqspi_info->dev));
 			stmqspi_info->dev.device_id = id1;
@@ -2230,10 +2243,10 @@ static int stmqspi_probe(struct flash_bank *bank)
 		if (p->device_id == id2) {
 			if (p->size_in_bytes / 4096)
 				LOG_INFO("flash2 \'%s\' id = 0x%06" PRIx32 " size = %" PRIu32
-					"kbytes", p->name, id2, p->size_in_bytes / 1024);
+					" KiB", p->name, id2, p->size_in_bytes / 1024);
 			else
 				LOG_INFO("flash2 \'%s\' id = 0x%06" PRIx32 " size = %" PRIu32
-					"bytes", p->name, id2, p->size_in_bytes);
+					" B", p->name, id2, p->size_in_bytes);
 
 			if (!id1)
 				memcpy(&stmqspi_info->dev, p, sizeof(stmqspi_info->dev));
@@ -2270,7 +2283,7 @@ static int stmqspi_probe(struct flash_bank *bank)
 
 		if (retval == ERROR_OK)
 			LOG_INFO("flash2 \'%s\' id = 0x%06" PRIx32 " size = %" PRIu32
-				"kbytes", temp.name, id2, temp.size_in_bytes / 1024);
+				" KiB", temp.name, id2, temp.size_in_bytes / 1024);
 		else {
 			/* even not identified by SFDP, then give up */
 			LOG_WARNING("Unknown flash2 device id = 0x%06" PRIx32
@@ -2301,9 +2314,13 @@ static int stmqspi_probe(struct flash_bank *bank)
 	/* Set correct size value */
 	bank->size = stmqspi_info->dev.size_in_bytes << dual;
 
-	fsize = ((READ_REG(SPI_DCR) >> SPI_FSIZE_POS) & (BIT(SPI_FSIZE_LEN) - 1));
+	uint32_t dcr;
+	retval = target_read_u32(target, io_base + SPI_DCR, &dcr);
+
 	if (retval != ERROR_OK)
 		goto err;
+
+	fsize = (dcr >> SPI_FSIZE_POS) & (BIT(SPI_FSIZE_LEN) - 1);
 
 	LOG_DEBUG("FSIZE = 0x%04x", fsize);
 	if (bank->size == BIT((fsize + 1)))
@@ -2323,7 +2340,7 @@ static int stmqspi_probe(struct flash_bank *bank)
 	/* create and fill sectors array */
 	bank->num_sectors = stmqspi_info->dev.size_in_bytes / stmqspi_info->dev.sectorsize;
 	sectors = malloc(sizeof(struct flash_sector) * bank->num_sectors);
-	if (sectors == NULL) {
+	if (!sectors) {
 		LOG_ERROR("not enough memory");
 		retval = ERROR_FAIL;
 		goto err;
@@ -2362,33 +2379,32 @@ static int stmqspi_protect_check(struct flash_bank *bank)
 	return ERROR_OK;
 }
 
-static int get_stmqspi_info(struct flash_bank *bank, char *buf, int buf_size)
+static int get_stmqspi_info(struct flash_bank *bank, struct command_invocation *cmd)
 {
 	struct stmqspi_flash_bank *stmqspi_info = bank->driver_priv;
 
 	if (!(stmqspi_info->probed)) {
-		snprintf(buf, buf_size,
-			"\nQSPI flash bank not probed yet\n");
+		command_print_sameline(cmd, "\nQSPI flash bank not probed yet\n");
 		return ERROR_FLASH_BANK_NOT_PROBED;
 	}
 
-	snprintf(buf, buf_size, "flash%s%s \'%s\', device id = 0x%06" PRIx32
-			", flash size = %" PRIu32 "%sbytes\n(page size = %" PRIu32
+	command_print_sameline(cmd, "flash%s%s \'%s\', device id = 0x%06" PRIx32
+			", flash size = %" PRIu32 "%s B\n(page size = %" PRIu32
 			", read = 0x%02" PRIx8 ", qread = 0x%02" PRIx8
 			", pprog = 0x%02" PRIx8 ", mass_erase = 0x%02" PRIx8
-			", sector size = %" PRIu32 "%sbytes, sector_erase = 0x%02" PRIx8 ")",
+			", sector size = %" PRIu32 " %sB, sector_erase = 0x%02" PRIx8 ")",
 			((stmqspi_info->saved_cr & (BIT(SPI_DUAL_FLASH) |
 			BIT(SPI_FSEL_FLASH))) != BIT(SPI_FSEL_FLASH)) ? "1" : "",
 			((stmqspi_info->saved_cr & (BIT(SPI_DUAL_FLASH) |
 			BIT(SPI_FSEL_FLASH))) != 0) ? "2" : "",
 			stmqspi_info->dev.name, stmqspi_info->dev.device_id,
 			bank->size / 4096 ? bank->size / 1024 : bank->size,
-			bank->size / 4096 ? "k" : "", stmqspi_info->dev.pagesize,
+			bank->size / 4096 ? "Ki" : "", stmqspi_info->dev.pagesize,
 			stmqspi_info->dev.read_cmd, stmqspi_info->dev.qread_cmd,
 			stmqspi_info->dev.pprog_cmd, stmqspi_info->dev.chip_erase_cmd,
 			stmqspi_info->dev.sectorsize / 4096 ?
 				stmqspi_info->dev.sectorsize / 1024 : stmqspi_info->dev.sectorsize,
-			stmqspi_info->dev.sectorsize / 4096 ? "k" : "",
+			stmqspi_info->dev.sectorsize / 4096 ? "Ki" : "",
 			stmqspi_info->dev.erase_cmd);
 
 	return ERROR_OK;

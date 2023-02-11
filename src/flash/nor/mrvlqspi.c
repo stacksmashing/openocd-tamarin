@@ -1,18 +1,7 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
+
 /***************************************************************************
  *   Copyright (C) 2014 by Mahavir Jain <mjain@marvell.com>                *
- *                                                                         *
- *   This program is free software; you can redistribute it and/or modify  *
- *   it under the terms of the GNU General Public License as published by  *
- *   the Free Software Foundation; either version 2 of the License, or     *
- *   (at your option) any later version.                                   *
- *                                                                         *
- *   This program is distributed in the hope that it will be useful,       *
- *   but WITHOUT ANY WARRANTY; without even the implied warranty of        *
- *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the         *
- *   GNU General Public License for more details.                          *
- *                                                                         *
- *   You should have received a copy of the GNU General Public License     *
- *   along with this program.  If not, see <http://www.gnu.org/licenses/>. *
  ***************************************************************************/
 
  /*
@@ -37,7 +26,7 @@
 #define QSPI_W_EN (0x1)
 #define QSPI_SS_DISABLE (0x0)
 #define QSPI_SS_ENABLE (0x1)
-#define WRITE_DISBALE (0x0)
+#define WRITE_DISABLE (0x0)
 #define WRITE_ENABLE (0x1)
 
 #define QSPI_TIMEOUT (1000)
@@ -882,7 +871,7 @@ static int mrvlqspi_probe(struct flash_bank *bank)
 	/* create and fill sectors array */
 	bank->num_sectors = mrvlqspi_info->dev->size_in_bytes / sectorsize;
 	sectors = malloc(sizeof(struct flash_sector) * bank->num_sectors);
-	if (sectors == NULL) {
+	if (!sectors) {
 		LOG_ERROR("not enough memory");
 		return ERROR_FAIL;
 	}
@@ -914,17 +903,16 @@ static int mrvlqspi_flash_erase_check(struct flash_bank *bank)
 	return ERROR_OK;
 }
 
-static int mrvlqspi_get_info(struct flash_bank *bank, char *buf, int buf_size)
+static int mrvlqspi_get_info(struct flash_bank *bank, struct command_invocation *cmd)
 {
 	struct mrvlqspi_flash_bank *mrvlqspi_info = bank->driver_priv;
 
 	if (!(mrvlqspi_info->probed)) {
-		snprintf(buf, buf_size,
-			"\nQSPI flash bank not probed yet\n");
+		command_print_sameline(cmd, "\nQSPI flash bank not probed yet\n");
 		return ERROR_OK;
 	}
 
-	snprintf(buf, buf_size, "\nQSPI flash information:\n"
+	command_print_sameline(cmd, "\nQSPI flash information:\n"
 		"  Device \'%s\' ID 0x%08" PRIx32 "\n",
 		mrvlqspi_info->dev->name, mrvlqspi_info->dev->device_id);
 
@@ -939,7 +927,7 @@ FLASH_BANK_COMMAND_HANDLER(mrvlqspi_flash_bank_command)
 		return ERROR_COMMAND_SYNTAX_ERROR;
 
 	mrvlqspi_info = malloc(sizeof(struct mrvlqspi_flash_bank));
-	if (mrvlqspi_info == NULL) {
+	if (!mrvlqspi_info) {
 		LOG_ERROR("not enough memory");
 		return ERROR_FAIL;
 	}
