@@ -8,7 +8,7 @@ name: OpenOCD Snapshot
 
 jobs:
   package-windows:
-    runs-on: ubuntu-latest
+    runs-on: [ubuntu-18.04]
     outputs:
       artifact-name: ${{ env.ARTIFACT_NAME }}
     env:
@@ -90,10 +90,12 @@ jobs:
           tar -czf $ARTIFACT *
           echo "RELEASE_NAME=$RELEASE_NAME" >> $GITHUB_ENV
           echo "IS_PRE_RELEASE=$IS_PRE_RELEASE" >> $GITHUB_ENV
+          echo "ARTIFACT_NAME=$ARTIFACT" >> $GITHUB_ENV
           echo "ARTIFACT_PATH=$PWD/$ARTIFACT" >> $GITHUB_ENV
       - name: Publish OpenOCD packaged for windows
-        uses: actions/upload-artifact@v2
+        uses: actions/upload-artifact@v3
         with:
+          name: ${{ env.ARTIFACT_NAME }}
           path: ${{ env.ARTIFACT_PATH }}
   package-linux:
     runs-on: ubuntu-latest
@@ -105,7 +107,7 @@ jobs:
         id: package-linux
         uses: ./microsoft/static-linux-build
       - name: Publish OpenOCD packaged for Linux
-        uses: actions/upload-artifact@v1
+        uses: actions/upload-artifact@v3
         with:
           name: ${{ steps.package-linux.outputs.artifact-name }}
           path: ${{ steps.package-linux.outputs.artifact-name }}
@@ -145,8 +147,6 @@ jobs:
         uses: actions/upload-release-asset@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Create Release
-        uses: ncipollo/release-action@v1
         with:
           upload_url: ${{ steps.create_release.outputs.upload_url }}
           asset_path: ${{ needs.package-windows.outputs.artifact-name }}

@@ -83,4 +83,4 @@ readonly openocd_name="openocd-${openocd_tag}-linux"
 make
 make install-strip
 tar -C "${install_dir}" -czf "${workspace_dir}/${openocd_name}.tar.gz" "${openocd_name}"
-echo "::set-output name=artifact-name::${openocd_name}.tar.gz"
+echo "artifact-name=${openocd_name}.tar.gz" >> $GITHUB_OUTPUT
