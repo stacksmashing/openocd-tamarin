@@ -2,7 +2,9 @@
 
 # Copyright (C) 2020 by Tarek BOUCHKATI <tarek.bouchkati@gmail.com>
 
-on: push workflow_dispatch
+on:
+  push:
+  workflow_dispatch:
 
 name: OpenOCD Snapshot
 
