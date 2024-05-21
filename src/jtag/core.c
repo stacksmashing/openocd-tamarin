@@ -625,6 +625,11 @@ static int adapter_system_reset(int req_srst)
 
 	/* Maybe change SRST signal state */
 	if (jtag_srst != req_srst) {
+		if(adapter_driver->reset == NULL) {
+			LOG_ERROR("adapter_driver->reset is NULL");
+			return ERROR_FAIL;
+		}
+
 		retval = adapter_driver->reset(0, req_srst);
 		if (retval != ERROR_OK) {
 			LOG_ERROR("SRST error");

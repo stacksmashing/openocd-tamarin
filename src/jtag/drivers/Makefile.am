@@ -71,6 +71,9 @@ endif
 if FTDI
 DRIVERFILES += %D%/ftdi.c %D%/mpsse.c
 endif
+if TAMARIN
+DRIVERFILES += %D%/tamarin.c
+endif
 if LINUXGPIOD
 DRIVERFILES += %D%/linuxgpiod.c
 endif

@@ -40,6 +40,9 @@ extern struct adapter_driver dummy_adapter_driver;
 #if BUILD_FTDI == 1
 extern struct adapter_driver ftdi_adapter_driver;
 #endif
+#if BUILD_TAMARIN == 1
+extern struct adapter_driver tamarin_adapter_driver;
+#endif
 #if BUILD_USB_BLASTER == 1 || BUILD_USB_BLASTER_2 == 1
 extern struct adapter_driver usb_blaster_adapter_driver;
 #endif
@@ -159,6 +162,9 @@ struct adapter_driver *adapter_drivers[] = {
 #endif
 #if BUILD_FTDI == 1
 		&ftdi_adapter_driver,
+#endif
+#if BUILD_TAMARIN == 1
+		&tamarin_adapter_driver,
 #endif
 #if BUILD_USB_BLASTER || BUILD_USB_BLASTER_2 == 1
 		&usb_blaster_adapter_driver,
