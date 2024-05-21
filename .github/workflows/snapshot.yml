@@ -10,7 +10,7 @@ name: OpenOCD Snapshot
 
 jobs:
   package-windows:
-    runs-on: [ubuntu-18.04]
+    runs-on: [ubuntu-latest]
     outputs:
       artifact-name: ${{ env.ARTIFACT_NAME }}
     env:
