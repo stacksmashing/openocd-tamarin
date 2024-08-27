@@ -82,6 +82,7 @@ struct tamarin_cmd_hdr_enc {
 
 #define VID 0x2B3E /* Raspberry Pi */
 #define PID 0x0004 /* Picoprobe */
+#define PID2 0x2343 /* Faultier */
 
 #define BULK_EP_OUT 4
 #define BULK_EP_IN  5
@@ -480,7 +481,7 @@ struct adapter_driver tamarin_adapter_driver = {
 static int tamarin_usb_open(void)
 {
 	const uint16_t vids[] = { VID, 0 };
-	const uint16_t pids[] = { PID, 0 };
+	const uint16_t pids[] = { PID, PID2, 0 };
 
 	if (jtag_libusb_open(vids, pids,
 			&tamarin_handle->usb_handle, NULL) != ERROR_OK) {
