@@ -480,7 +480,7 @@ struct adapter_driver tamarin_adapter_driver = {
 
 static int tamarin_usb_open(void)
 {
-	const uint16_t vids[] = { VID, 0 };
+	const uint16_t vids[] = { VID, VID, 0 };
 	const uint16_t pids[] = { PID, PID2, 0 };
 
 	if (jtag_libusb_open(vids, pids,
