@@ -39,7 +39,7 @@
 
 #ifdef PKGBLDDATE
 #define OPENOCD_VERSION	\
-	"Open On-Chip Debugger " VERSION RELSTR " (" PKGBLDDATE ") [https://github.com/microsoft/openocd]"
+	"Open On-Chip Debugger " VERSION RELSTR " (" PKGBLDDATE ") [https://github.com/stacksmashing/openocd-tamarin]"
 #else
 #define OPENOCD_VERSION	\
 	"Open On-Chip Debugger " VERSION RELSTR
