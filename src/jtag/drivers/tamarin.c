@@ -84,9 +84,13 @@ struct tamarin_cmd_hdr_enc {
 #define PID 0x0004 /* Picoprobe */
 #define PID2 0x2343 /* Faultier */
 
+#define VID_HEXTREE 0x37de /* Hextree */
+#define PID_HEXTREE_FAULTIER 0xfffd /* Faultier */
+
 #define BULK_EP_OUT 4
 #define BULK_EP_IN  5
 #define PICOPROBE_INTERFACE 2
+#define HEXTREE_PROBE_INTERFACE 1
 
 #define PICOPROBE_MAX_PACKET_LENGTH 512
 #define LIBUSB_TIMEOUT 1000
@@ -480,8 +484,8 @@ struct adapter_driver tamarin_adapter_driver = {
 
 static int tamarin_usb_open(void)
 {
-	const uint16_t vids[] = { VID, VID, 0 };
-	const uint16_t pids[] = { PID, PID2, 0 };
+	const uint16_t vids[] = { VID, VID, VID_HEXTREE, 0 };
+	const uint16_t pids[] = { PID, PID2, PID_HEXTREE_FAULTIER, 0 };
 
 	if (jtag_libusb_open(vids, pids,
 			&tamarin_handle->usb_handle, NULL) != ERROR_OK) {
@@ -491,10 +495,16 @@ static int tamarin_usb_open(void)
 
 	
 
-	if (libusb_claim_interface(tamarin_handle->usb_handle, PICOPROBE_INTERFACE) != ERROR_OK) {
-		LOG_ERROR("Failed to claim tamarin cable interface");
-		return ERROR_FAIL;
+	/* New Faultier firmware uses a different interface number for the probe. */
+	if (libusb_claim_interface(tamarin_handle->usb_handle, HEXTREE_PROBE_INTERFACE) != ERROR_OK) {
+		/* Legacy firmware support */
+		if (libusb_claim_interface(tamarin_handle->usb_handle, PICOPROBE_INTERFACE) != ERROR_OK) {
+			LOG_ERROR("Failed to claim tamarin cable interface");
+			return ERROR_FAIL;
+		}
 	}
+
+	
 
 	return ERROR_OK;
 }
